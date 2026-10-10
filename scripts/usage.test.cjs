@@ -221,3 +221,16 @@ test('collapsed summaries show the forecast that drives their status', () => {
   r.renderUsage({ machines: [{ usage: { cards: [card({ gauges: [gauge(20, 90)] })] } }] });
   assert.match(body.innerHTML, /ugroup-sum s-tight"><span>Weekly<\/span> <b>20% used ·<\/b> <span>90% at reset ·<\/span> <span class="uphrase">near limit<\/span><\/span>/);
 });
+
+test('verdicts without pace data keep their source and never claim on pace', () => {
+  const { r, summary } = renderer();
+  const old = new Date(Date.now() - 20 * 60000).toISOString();
+  const balance = card({ key: 'moonshot', label: 'Moonshot AI', kind: 'balance', gauges: undefined, balanceUsd: 5 });
+  r.renderUsage({ machines: [{ usage: { cards: [card({ gauges: [gauge(null)], fetchedAt: old, error: 'timeout' }), balance] } }] });
+  assert.match(summary.innerHTML, /no quota readings<\/span><span class="usr">, <\/span><span class="ufresh cached">refresh failed · cached 20m ago/);
+  r.renderUsage({ machines: [{ usage: { cards: [card({ gauges: [{ label: 'Weekly', usedPercent: 10 }] }), balance] } }] });
+  assert.match(summary.innerHTML, /uverdict s-unknown">Codex weekly has no reset time/);
+  assert.doesNotMatch(summary.innerHTML, /on pace/);
+  r.renderUsage({ machines: [{ usage: { cards: [card({ gauges: [gauge(0)] })] } }] });
+  assert.match(summary.innerHTML, /all plans on pace/);
+});

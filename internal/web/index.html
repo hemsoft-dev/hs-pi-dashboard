@@ -100,7 +100,7 @@
   .usage-summary { flex: 1 1 auto; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; margin-left: 10px;
     font-size: 13px; letter-spacing: 0; text-transform: none; font-variant-numeric: tabular-nums; }
   .ufresh { margin-left: auto; color: var(--muted); font-size: 11px; font-weight: 400; }
-  .ufresh.cached, .ufresh.stale { color: var(--ember); }
+  .ufresh.cached { color: var(--ember); }
   .uverdict { color: var(--text); font-weight: 600; }
   .uverdict.s-risk, .uverdict.s-out { color: var(--ember); }
   .uverdict.s-tight { color: var(--gold); }
@@ -561,13 +561,21 @@ function usageVerdict(windows) {
     return { text: `${name} ${statusPhrase(worst)}`, more, status: worst.status, source: [worst] };
   }
   if (worst.status === "tight") return { text: `${name} near limit (${pctText(worst.projected ?? worst.used)})`, status: "tight", source: [worst] };
-  if (worst.status === "unknown") return { text: "no quota readings", status: "unknown" };
+  if (worst.status === "unknown") return { text: "no quota readings", status: "unknown", source: windows };
   const unread = windows.filter((w) => w.status === "unknown");
   if (unread.length) {
     const u = windowName(unread[0].raw);
     const uname = `${unread[0].provider} ${u.known ? (u.pool ? u.pool + " " : "") + u.period : unread[0].label}`;
     const more = unread.length > 1 ? `${unread.length - 1} more without a reading` : "";
     return { text: `${uname} has no reading`, more, status: "unknown", source: [unread[0]] };
+  }
+  // Without a reset time there is no pace to judge, so never call it on pace.
+  const untimed = windows.filter((w) => w.remaining == null && w.projected == null);
+  if (untimed.length) {
+    const t = windowName(untimed[0].raw);
+    const tname = `${untimed[0].provider} ${t.known ? (t.pool ? t.pool + " " : "") + t.period : untimed[0].label}`;
+    const more = untimed.length > 1 ? `${untimed.length - 1} more without a reset time` : "";
+    return { text: `${tname} has no reset time`, more, status: "unknown", source: [untimed[0]] };
   }
   return { text: "all plans on pace", status: "ok", source: windows };
 }
