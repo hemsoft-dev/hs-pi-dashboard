@@ -91,56 +91,39 @@
     .pulse-cursor, .pulse-cursor.beat { animation: none; transition: none; }
     .refresh .dot, .live { animation: none; }
   }
-  /* Usage cards are account-level (merged across agents) and laid out as
-     masonry columns of equal width: the compact cards (single-gauge
-     speedometers + balances) stack in the first column so the money cards
-     tuck directly under Codex, and each multi-gauge card gets its own
-     column. A column holding a single card stretches it to the section
-     height so all card bottoms align. */
+  /* Account-level charts share a quiet scale and readable text at every size. */
   .usage-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
   @media (max-width: 980px) {
-    .usage-grid { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
+    .usage-grid { grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr)); }
   }
   .usage-col { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
-  .usage-col > .ucard:only-child:not(.collapsed) { flex: 1 1 auto; }
-  .gauges { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; }
-  .ucard {
-    background: var(--card); border: 1px solid var(--card-border); border-radius: 4px;
-    padding: 12px 14px; display: flex; flex-direction: column; gap: 10px;
-  }
-  .ucard-label { color: var(--gold); font-weight: 600; font-size: 13px; letter-spacing: .5px; }
-  .ucard-error { color: var(--muted); font-size: 11.5px; font-style: italic; }
-  .gauges { display: flex; flex-wrap: wrap; gap: 12px; }
-  .gauge { display: flex; flex-direction: column; align-items: center; width: 118px; gap: 2px; }
-  .gauge svg { width: 118px; height: 72px; }
-  .gauge .glabel { color: var(--text); font-size: 11px; }
-  .gauge .greset { color: var(--muted); font-size: 10px; }
-  .gauge .gproj { font-size: 10px; color: var(--gold-dim); }
-  .gauge .gproj.over { color: #ff6b6b; }
-  .balance { display: flex; align-items: baseline; gap: 10px; }
+  .ucard { background: var(--card); border: 1px solid var(--card-border); border-radius: 4px; padding: 12px 14px; min-width: 0; }
+  .ucard-head { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }
+  .ucard-label { color: var(--gold); font-weight: 600; font-size: 13px; }
+  .ucard-toggle { min-height: 44px; background: none; border: 0; padding: 4px 0; color: inherit; font: inherit; width: 100%; display: flex; align-items: center; gap: 8px; text-align: left; cursor: pointer; }
+  .ucard-toggle:hover .ucard-label { color: var(--text); }
+  .ucard-toggle:focus-visible { outline: 2px solid var(--gold); outline-offset: 4px; border-radius: 2px; }
+  .ucard .chev { width: 12px; height: 12px; flex: 0 0 auto; color: #aaa398; }
+  .usage-stale { color: #aaa398; font-size: 11px; margin-left: auto; text-align: right; }
+  .ucard-error { display: block; color: #c5b9a8; font-size: 12px; overflow-wrap: anywhere; }
+  .ucard-notice { margin-bottom: 12px; }
+  .gauges { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 144px), 1fr)); gap: 20px 12px; }
+  .gauge { display: flex; flex-direction: column; align-items: center; gap: 6px; min-width: 0; text-align: center; font-variant-numeric: tabular-nums; }
+  .gauge .glabel { color: var(--text); font-size: 12px; font-weight: 600; overflow-wrap: anywhere; }
+  .gauge-dial { position: relative; width: 144px; height: 88px; }
+  .gauge svg { display: block; width: 144px; height: 88px; }
+  .gvalue { position: absolute; inset: 34px 0 auto; color: var(--text); font-size: 26px; font-weight: 600; line-height: 1.15; }
+  .gvalue small { display: block; color: #aaa398; font-size: 11px; font-weight: 400; margin-top: 2px; }
+  .gvalue.unavailable { font-size: 15px; top: 43px; }
+  .greset, .gproj { color: #aaa398; font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
+  .gproj.over { color: #f08b8b; }
+  .forecast-key { display: inline-block; width: 6px; height: 6px; border: 1px solid currentColor; border-radius: 50%; margin-right: 5px; vertical-align: 1px; }
+  .balance { display: flex; align-items: baseline; gap: 10px; font-variant-numeric: tabular-nums; }
   .balance .amount { color: var(--gold); font-size: 26px; font-weight: 600; }
-  .usage-stale { color: var(--muted); font-size: 10px; }
-  .ucard.collapsible { cursor: pointer; user-select: none; }
-  .ucard.collapsible:hover { border-color: #3f3f3f; }
-  .ucard .chev { color: var(--muted); font-size: 10px; transition: transform .15s; }
-  .ucard.collapsed {
-    flex-direction: row; align-items: baseline; flex-wrap: wrap;
-    gap: 4px 10px; padding: 5px 12px; border-left-width: 2px;
-    /* Row stretch would pin this card to its siblings' height with dead
-       space beneath the chip; size to content instead. */
-    align-self: start;
-  }
-  .ucard.collapsed .ucard-label { font-size: 12.5px; }
-  .ucard.collapsed .ucard-compact { display: contents; }
-  .ucard.collapsed .chev { margin-left: auto; transform: rotate(-90deg); }
-  .ucard.collapsed .usage-stale { font-size: 9.5px; }
-  .ucard-compact { display: flex; flex-wrap: wrap; gap: 6px; }
-  .ucard-compact .mini {
-    display: inline-flex; align-items: baseline; gap: 5px; white-space: nowrap;
-    font-size: 11.5px; color: var(--text);
-    background: #080808; border: 1px solid var(--card-border); border-radius: 3px; padding: 1px 7px;
-  }
-  .ucard-compact .mini .gproj { font-size: 10.5px; }
+  .ucard.collapsed .ucard-head { margin-bottom: 8px; }
+  .ucard.collapsed .chev { transform: rotate(-90deg); }
+  .ucard-compact { display: flex; flex-wrap: wrap; gap: 8px 16px; }
+  .ucard-compact .mini { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 5px; font-size: 12px; color: var(--text); }
 
   .session-table-wrap { border: 1px solid var(--card-border); border-radius: 4px; background: var(--card); }
   .session-table {
@@ -265,7 +248,7 @@
   </div>
 </section>
 <section class="usage-section">
-  <button id="usage-toggle" class="usage-toggle" aria-expanded="true">
+  <button id="usage-toggle" aria-controls="usage-body" class="usage-toggle" aria-expanded="true">
     <span class="chev">▾</span> Usage &amp; Balances
     <span class="hint">plan speedometers · balances · agent polls every 60s</span>
   </button>
@@ -321,8 +304,9 @@ function compactDur(ms) {
 // Live reset countdown: recomputed every render so cached agent data never
 // shows a stale "resets now".
 function resetCountdown(resetAt) {
-  if (!resetAt) return "";
+  if (!resetAt) return "reset time unavailable";
   const ms = new Date(resetAt).getTime() - Date.now();
+  if (!Number.isFinite(ms)) return "reset time unavailable";
   if (ms <= 0) return "resetting…";
   return "resets in " + compactDur(ms);
 }
@@ -340,199 +324,93 @@ function durationOf(s) {
 }
 
 // --- usage speedometers -----------------------------------------------------
-// Gauges represent USAGE (0% = empty and bright green, 100% = full and dark
-// red) on the statusline's green→red scale, drawn on a 3D-bezel dial.
-
-const USAGE_SCALE = [
-  [50, "#00ff00"], // bright green
-  [65, "#00af00"], // green
-  [75, "#ff9500"], // orange
-  [85, "#ffff00"], // yellow
-  [92, "#ff2b2b"], // bright red
-  [97, "#d70000"], // red
-  [101, "#870000"], // dark red
-];
-function usageColor(pct) {
-  for (const [max, color] of USAGE_SCALE) if (pct < max) return color;
-  return USAGE_SCALE[USAGE_SCALE.length - 1][1];
+// HTML/SVG adaptation of GPUI Kit chart styling; no native GPUI runtime.
+function usedPercent(value) {
+  return Number.isFinite(value) ? Math.max(0, Math.min(100, value)) : null;
 }
-
-let gaugeUID = 0;
-
+function projectedPercent(value) {
+  return Number.isFinite(value) && value >= 0 ? value : null;
+}
+function usageColor(pct) {
+  return pct == null ? "#aaa398" : pct >= 85 ? "#f08b8b" : pct >= 65 ? "#e5b567" : "#73c6a3";
+}
 function polar(cx, cy, r, deg) {
-  // deg 180 = left edge, 270 = top, 360 = right edge (SVG y-down coordinates).
   const a = ((deg - 180) * Math.PI) / 180;
   return [cx - r * Math.cos(a), cy - r * Math.sin(a)];
 }
-
-// Arc swept clockwise from `startDeg` (180 = left edge) to `endDeg`
-// (360 = right edge) over the top of the dial.
 function arcPath(cx, cy, r, startDeg, endDeg) {
   const [sx, sy] = polar(cx, cy, r, startDeg);
   const [ex, ey] = polar(cx, cy, r, endDeg);
-  const large = endDeg - startDeg > 180 ? 1 : 0;
-  return `M ${sx.toFixed(2)} ${sy.toFixed(2)} A ${r} ${r} 0 ${large} 1 ${ex.toFixed(2)} ${ey.toFixed(2)}`;
+  return `M ${sx.toFixed(2)} ${sy.toFixed(2)} A ${r} ${r} 0 0 1 ${ex.toFixed(2)} ${ey.toFixed(2)}`;
 }
-
+function forecastText(projected) {
+  return projected == null ? "forecast unavailable" : `At reset ${Math.round(projected)}%${projected > 100 ? " · over limit" : ""}`;
+}
 function gaugeSvg(g) {
-  const used = Math.max(0, Math.min(100, g.usedPercent ?? 0));
-  const color = usageColor(used);
-  const id = "hg" + (++gaugeUID);
-  const cx = 60, cy = 56, r = 44;
-  const sweep = (used / 100) * 180;
-  const endDeg = 180 + sweep;
-  const [capX, capY] = polar(cx, cy, r - 2, endDeg);
-
-  // Ghost projection: a glassy translucent arc from current usage to where
-  // the current pace would land at reset (capped at the dial edge; the exact
-  // number lives in the proj chip). A notch separates it from the measured
-  // arc; frosted halo + specular streak + rim lights give it a distinct
-  // "future pane" material. Overshoots tint the glass alarm red.
-  let ghost = "";
-  if (g.projectedEnd != null) {
-    const proj = Math.max(0, Math.min(100, g.projectedEnd));
-    const projDeg = 180 + (proj / 100) * 180;
-    if (projDeg - endDeg > 1) {
-      const [px, py] = polar(cx, cy, r, projDeg);
-      const over = g.projectedEnd > 100;
-      const projColor = over ? "#ff6b6b" : usageColor(proj);
-      const gapDeg = 2.5;
-      const gStart = Math.min(endDeg + gapDeg, projDeg);
-      ghost =
-        `<path d="${arcPath(cx, cy, r, gStart, projDeg)}" stroke="${projColor}" stroke-width="15" fill="none" stroke-linecap="butt" opacity=".22" filter="url(#${id}-frost)"/>` +
-        `<path d="${arcPath(cx, cy, r, gStart, projDeg)}" stroke="${projColor}" stroke-width="11" fill="none" stroke-linecap="butt" opacity=".5"/>` +
-        `<path d="${arcPath(cx, cy, r - 3, gStart, projDeg)}" stroke="rgba(255,255,255,.5)" stroke-width="2.2" fill="none" stroke-linecap="round"/>` +
-        `<path d="${arcPath(cx, cy, r + 5, gStart, projDeg)}" stroke="rgba(255,255,255,.28)" stroke-width="1" fill="none"/>` +
-        `<path d="${arcPath(cx, cy, r - 5, gStart, projDeg)}" stroke="rgba(0,0,0,.45)" stroke-width="1" fill="none"/>` +
-        `<circle cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="4.5" fill="${projColor}" fill-opacity=".75" stroke="rgba(255,255,255,.7)" stroke-width="1.2"/><title>projected ${Math.round(g.projectedEnd)}% at reset</title>`;
-    }
+  const used = usedPercent(g.usedPercent);
+  const projected = projectedPercent(g.projectedEnd);
+  const value = used == null ? "unavailable" : `${Math.round(used)}%`;
+  const reset = resetCountdown(g.resetAt);
+  const forecast = forecastText(projected);
+  const cx = 72, cy = 70, r = 58;
+  const measured = used > 0
+    ? `<path class="measured-arc" d="${arcPath(cx, cy, r, 180, 180 + used * 1.8)}" stroke="${usageColor(used)}" stroke-width="6" stroke-linecap="round" fill="none"/>` : "";
+  let marker = "";
+  if (projected != null) {
+    const [x, y] = polar(cx, cy, r, 180 + Math.min(100, projected) * 1.8);
+    marker = `<circle class="forecast-marker" cx="${x.toFixed(2)}" cy="${y.toFixed(2)}" r="4" fill="var(--card)" stroke="${projected > 100 ? "#f08b8b" : "#aaa398"}" stroke-width="1.5"/>`;
   }
-
-  const ticks = [];
-  for (let t = 0; t <= 100; t += 10) {
-    const deg = 180 + (t / 100) * 180;
-    const [x1, y1] = polar(cx, cy, r + 7, deg);
-    const [x2, y2] = polar(cx, cy, r + (t % 25 === 0 ? 10.5 : 9), deg);
-    ticks.push(`<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="${t % 25 === 0 ? "#4a4436" : "#232323"}" stroke-width="1"/>`);
-  }
-
-  const face = `M ${cx - r} ${cy} A ${r} ${r} 0 0 1 ${cx + r} ${cy} L ${cx - r} ${cy} Z`;
-
-  return `
-  <div class="gauge">
-    <svg viewBox="0 0 120 76" role="img" aria-label="${esc(g.label)}: ${Math.round(used)}% used">
-      <defs>
-        <linearGradient id="${id}-bezel" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stop-color="#333333"/>
-          <stop offset=".55" stop-color="#161616"/>
-          <stop offset="1" stop-color="#050505"/>
-        </linearGradient>
-        <radialGradient id="${id}-face" cx=".5" cy=".85" r="1">
-          <stop offset="0" stop-color="#000000"/>
-          <stop offset=".8" stop-color="#0d0d0d"/>
-          <stop offset="1" stop-color="#181818"/>
-        </radialGradient>
-        <filter id="${id}-frost" x="-30%" y="-30%" width="160%" height="160%">
-          <feGaussianBlur stdDeviation="2.4"/>
-        </filter>
-        <filter id="${id}-shadow" x="-20%" y="-20%" width="140%" height="160%">
-          <feDropShadow dx="0" dy="1.5" stdDeviation="1.5" flood-color="#000000" flood-opacity=".9"/>
-        </filter>
-      </defs>
-      <g filter="url(#${id}-shadow)">
-        <path d="${face}" fill="url(#${id}-face)" stroke="#2a2a2a" stroke-width="1"/>
-        <path d="${arcPath(cx, cy, r + 6, 180, 360)}" stroke="#3d3d3d" stroke-width="1.2" fill="none"/>
-        <path d="${arcPath(cx, cy, r, 180, 360)}" stroke="url(#${id}-bezel)" stroke-width="11" fill="none" stroke-linecap="round"/>
-        <path d="${arcPath(cx, cy, r, 180, 360)}" stroke="#000000" stroke-width="4" fill="none" stroke-linecap="round" opacity=".6"/>
-        ${ticks.join("")}
-        ${ghost}
-        ${sweep > 0.4 ? `
-        <path d="${arcPath(cx, cy, r, 180, endDeg)}" stroke="${color}" stroke-width="11" fill="none" stroke-linecap="round"/>
-        <path d="${arcPath(cx, cy, r - 3.5, 180, Math.max(180.5, endDeg - 1))}" stroke="rgba(255,255,255,.4)" stroke-width="2" fill="none" stroke-linecap="round"/>
-        <circle cx="${capX.toFixed(1)}" cy="${capY.toFixed(1)}" r="3.2" fill="#ffffff" opacity=".55"/>` : `
-        <circle cx="${polar(cx, cy, r, 180)[0].toFixed(1)}" cy="${polar(cx, cy, r, 180)[1].toFixed(1)}" r="4" fill="${color}"/>`}
-      </g>
-      <text x="${cx}" y="${cy - 2}" text-anchor="middle" fill="${color}" font-size="17" font-weight="700" font-family="inherit">${Math.round(used)}%</text>
-      <text x="${cx}" y="${cy + 12}" text-anchor="middle" fill="#8a8578" font-size="8.5">used</text>
-    </svg>
+  return `<div class="gauge" role="img" aria-label="${esc(g.label)}: ${value}${used == null ? "" : " used"}; ${esc(reset)}; ${esc(forecast)}">
     <span class="glabel">${esc(g.label)}</span>
-    <span class="greset">${resetCountdown(g.resetAt)}</span>
-    ${g.projectedEnd != null ? (() => {
-      const p = Math.round(g.projectedEnd);
-      return `<span class="gproj ${p > 100 ? "over" : ""}" title="projected end-of-window usage at the current pace">⇗ proj ${p}%</span>`;
-    })() : ""}
+    <div class="gauge-dial">
+      <svg viewBox="0 0 144 88" aria-hidden="true" focusable="false">
+        <path d="${arcPath(cx, cy, r, 180, 360)}" stroke="#333333" stroke-width="6" stroke-linecap="round" fill="none"/>
+        ${measured}${marker}
+      </svg>
+      <span class="gvalue ${used == null ? "unavailable" : ""}">${value}${used == null ? "" : "<small>used</small>"}</span>
+    </div>
+    <span class="greset">${esc(reset)}</span>
+    <span class="gproj ${projected > 100 ? "over" : ""}">${projected == null ? "" : '<span class="forecast-key" aria-hidden="true"></span>'}${esc(forecast)}</span>
   </div>`;
 }
-
+function usageFreshness(card) {
+  const fetched = Date.parse(card.fetchedAt || "");
+  if (!Number.isFinite(fetched)) return "update time unavailable";
+  const age = Math.max(0, Date.now() - fetched);
+  return `${age > 180000 ? "stale · " : ""}${compactDur(age)} ago`;
+}
 function usageCard(card, machine) {
   const collapsible = card.kind !== "unknown";
   const collapsed = collapsible && cardCollapsed(machine, card.key);
-  const chev = collapsible
-    ? `<span class="chev" title="${collapsed ? "expand" : "collapse"}">▾</span>`
-    : "";
-  const age = card.fetchedAt ? `<span class="usage-stale" title="${esc(card.fetchedAt)}">· ${rel(card.fetchedAt)}</span>` : "";
-
-  let body = "";
-  if (collapsed) {
-    body = compactBody(card);
-  } else if (card.kind === "quota") {
-    body = card.gauges?.length
-      ? `<div class="gauges">${card.gauges.map(gaugeSvg).join("")}</div>`
-      : `<span class="ucard-error">${esc(card.error || "no data")}</span>`;
-  } else if (card.kind === "balance") {
-    body = card.balanceUsd != null
-      ? `<div class="balance"><span class="amount">$${card.balanceUsd.toFixed(2)}</span></div>`
-      : `<span class="ucard-error">${esc(card.error || "unknown")}</span>`;
-  } else {
-    body = `<span class="ucard-error">${esc(card.error || "no usage source yet")}</span>`;
-  }
-
-  const attrs = collapsible
-    ? ` role="button" tabindex="0" data-machine="${esc(machine)}" data-key="${esc(card.key)}" `
-      + `onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}"`
-    : "";
-
-  if (collapsed) {
-    return `
-  <div class="ucard collapsible collapsed"${attrs}>
-    <span class="ucard-label">${esc(card.label)}</span>
-    ${compactBody(card)}
-    <span class="usage-stale" title="${esc(card.fetchedAt || "")}">· ${rel(card.fetchedAt)}</span>
-    <span class="chev" title="expand">▾</span>
-  </div>`;
-  }
-
-  return `
-  <div class="ucard ${collapsible ? "collapsible" : ""}"${attrs}>
-    <div class="ucard-label" style="display:flex;justify-content:space-between;align-items:baseline">${esc(card.label)}${age}
-      ${chev}
-    </div>
-    ${body}
-  </div>`;
+  const label = `<span class="ucard-label">${esc(card.label)}</span><span class="usage-stale">${esc(usageFreshness(card))}</span>`;
+  const id = "usage-card-" + encodeURIComponent(machine + ":" + card.key);
+  const heading = collapsible
+    ? `<button type="button" class="ucard-toggle" data-machine="${esc(machine)}" data-key="${esc(card.key)}" aria-expanded="${!collapsed}" aria-controls="${esc(id)}">${label}<svg class="chev" viewBox="0 0 12 12" aria-hidden="true"><path d="m2 4 4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></button>`
+    : label;
+  const notice = card.error ? `<span class="ucard-error ucard-notice">${esc(card.error)}${card.gauges?.length || card.balanceUsd != null ? " · cached values" : ""}</span>` : "";
+  let body;
+  if (collapsed) body = compactBody(card);
+  else if (card.kind === "quota") body = card.gauges?.length
+    ? `<div class="gauges">${card.gauges.map(gaugeSvg).join("")}</div>`
+    : '<span class="ucard-error">usage unavailable</span>';
+  else if (card.kind === "balance") body = Number.isFinite(card.balanceUsd)
+    ? `<div class="balance"><span class="amount">$${card.balanceUsd.toFixed(2)}</span></div>`
+    : '<span class="ucard-error">balance unavailable</span>';
+  else body = '<span class="ucard-error">no usage source yet</span>';
+  return `<div class="ucard ${collapsed ? "collapsed" : ""}"><div class="ucard-head">${heading}</div><div id="${esc(id)}">${notice}${body}</div></div>`;
 }
-
-// compactBody is the collapsed "numbers only" strip: colored used-percent
-// per window with its projection, or the prepaid balance.
 function compactBody(card) {
   if (card.kind === "quota") {
     const minis = (card.gauges || []).map((g) => {
-      const pct = Math.round(g.usedPercent);
-      const proj = g.projectedEnd != null
-        ? (() => {
-            const p = Math.round(g.projectedEnd);
-            return `<span class="gproj ${p > 100 ? "over" : ""}">⇗${p}%</span>`;
-          })()
-        : "";
-      return `<span class="mini"><b style="color:${usageColor(g.usedPercent)}">${pct}%</b> ${esc(g.label)}${proj}</span>`;
+      const used = usedPercent(g.usedPercent);
+      const projected = projectedPercent(g.projectedEnd);
+      return `<span class="mini">${esc(g.label)} <b style="color:${usageColor(used)}">${used == null ? "unavailable" : Math.round(used) + "% used"}</b><span class="gproj ${projected > 100 ? "over" : ""}">${esc(forecastText(projected))}</span></span>`;
     }).join("");
-    return `<div class="ucard-compact">${minis || `<span class="ucard-error">${esc(card.error || "no data")}</span>`}</div>`;
+    return `<div class="ucard-compact">${minis || '<span class="ucard-error">usage unavailable</span>'}</div>`;
   }
-  if (card.kind === "balance") {
-    return card.balanceUsd != null
-      ? `<div class="ucard-compact"><span class="mini"><b style="color:var(--gold)">$${card.balanceUsd.toFixed(2)}</b></span></div>`
-      : `<div class="ucard-compact"><span class="ucard-error">${esc(card.error || "unknown")}</span></div>`;
-  }
-  return `<span class="ucard-error">${esc(card.error || "")}</span>`;
+  return Number.isFinite(card.balanceUsd)
+    ? `<div class="ucard-compact"><span class="mini"><b style="color:var(--gold)">$${card.balanceUsd.toFixed(2)}</b></span></div>`
+    : '<span class="ucard-error">balance unavailable</span>';
 }
 
 let lastFleet = null;
@@ -850,16 +728,24 @@ function toggleCard(machine, key) {
 
 function bindUsageCardToggles() {
   document.getElementById("usage-body").addEventListener("click", (e) => {
-    const el = e.target.closest(".ucard.collapsible");
+    const el = e.target.closest(".ucard-toggle");
     if (el) toggleCard(el.dataset.machine, el.dataset.key);
   });
 }
 
 function renderUsage(fleet) {
   const body = document.getElementById("usage-body");
+  const focused = document.activeElement;
+  const focusKey = body.contains(focused) && focused?.matches(".ucard-toggle") ? { ...focused.dataset } : null;
+  const restoreFocus = () => {
+    if (!focusKey) return;
+    const control = [...body.querySelectorAll(".ucard-toggle")].find((el) => el.dataset.machine === focusKey.machine && el.dataset.key === focusKey.key);
+    (control || document.getElementById("usage-toggle")).focus({ preventScroll: true });
+  };
   const machines = (fleet.machines ?? []).filter((m) => m.usage && m.usage.cards?.length);
   if (!machines.length) {
     body.innerHTML = '<p class="empty">no usage reporters online yet</p>';
+    restoreFocus();
     return;
   }
   // Usage cards are account-level, not per machine: several agents report the
@@ -872,7 +758,7 @@ function renderUsage(fleet) {
       const better = !prev
         || (prev.error && !c.error)
         || ((!!prev.error === !!c.error)
-            && new Date(c.fetchedAt || 0) > new Date(prev.fetchedAt || 0));
+            && (Date.parse(c.fetchedAt) || 0) > (Date.parse(prev.fetchedAt) || 0));
       if (better) byKey.set(c.key, c);
     }
   }
@@ -890,8 +776,9 @@ function renderUsage(fleet) {
   const cols = [col1];
   multis.forEach((c, i) => (cols[1 + (i % 2)] ??= []).push(c));
   body.innerHTML =
-    `<div class="usage-grid">${cols.map((col) =>
+    `<div class="usage-grid">${cols.filter((col) => col.length).map((col) =>
       `<div class="usage-col">${col.map((c) => usageCard(c, "global")).join("")}</div>`).join("")}</div>`;
+  restoreFocus();
 }
 
 const USAGE_TOGGLE_KEY = "hs-pi-dashboard:usage-open";
