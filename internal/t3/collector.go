@@ -1,5 +1,5 @@
-// Package t3 reads T3 Code's local SQLite projections without changing them.
-// It reports metadata and provider counters, never prompts or tool payloads.
+// Package t3 reads T3 Code's local SQLite projections and authenticated live
+// states. It reports metadata and counters, never prompts or tool payloads.
 package t3
 
 import (
@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -22,6 +23,7 @@ import (
 // Collector owns the incremental activity cache for one T3 environment.
 type Collector struct {
 	path        string
+	runtime     *runtimeSource
 	defaultPath bool
 	window      time.Duration
 	now         func() time.Time
@@ -40,7 +42,7 @@ type activity struct {
 
 // New uses the default T3 userdata path when path is empty. Each configured
 // environment gets its own collector and namespaced thread identities.
-func New(path string, window time.Duration) *Collector {
+func New(path string, window time.Duration, binary string) *Collector {
 	defaultPath := path == ""
 	if path == "" {
 		home, _ := os.UserHomeDir()
@@ -56,7 +58,7 @@ func New(path string, window time.Duration) *Collector {
 	if window <= 0 {
 		window = sessions.DefaultActiveWindow
 	}
-	return &Collector{path: path, defaultPath: defaultPath, window: window, now: time.Now, activities: map[string]*activity{}}
+	return &Collector{path: path, runtime: newRuntime(path, binary), defaultPath: defaultPath, window: window, now: time.Now, activities: map[string]*activity{}}
 }
 
 // Poll reads a consistent projection snapshot. A failed source retains cached
@@ -123,6 +125,73 @@ func (c *Collector) Poll() sessions.Snapshot {
 	if err = tx.Commit(); err != nil {
 		return c.unavailable(now, "T3 database snapshot interrupted")
 	}
+	runtimeError := ""
+	if c.runtime != nil {
+		live, err := c.runtime.snapshot(ctx)
+		if err != nil {
+			runtimeError = err.Error()
+			for i := range rows {
+				rows[i].Active = false
+				rows[i].Status = "unavailable"
+			}
+			// Keep a thread first discovered through the live API visible if
+			// that API fails before SQLite catches up.
+			seen := map[string]bool{}
+			for _, row := range rows {
+				seen[row.ID] = true
+			}
+			for _, row := range c.last.Sessions {
+				if !seen[row.ID] {
+					row.Active, row.Status = false, "unavailable"
+					rows = append(rows, row)
+					seen[row.ID] = true
+				}
+			}
+		} else {
+			states := map[string]liveThread{}
+			for _, thread := range live {
+				states[thread.ID] = thread
+			}
+			for i := range rows {
+				id := strings.TrimPrefix(rows[i].ID, c.prefix())
+				if thread, ok := states[id]; ok {
+					rows[i].Status, rows[i].Active = thread.state()
+					if thread.Session != nil && (thread.Session.Status == "running" || thread.Session.Status == "starting") {
+						rows[i].TurnCompletedAt = nil
+					}
+					delete(states, id)
+				} else {
+					rows[i].Active = false
+					rows[i].Status = "stopped"
+				}
+			}
+			// A thread may start after the SQLite transaction. Include it from
+			// the live snapshot now; the next poll fills in persisted counters.
+			for _, thread := range live {
+				if _, ok := states[thread.ID]; !ok {
+					continue
+				}
+				status, active := thread.state()
+				provider := thread.ModelSelection.Instance
+				if thread.Session != nil && thread.Session.ProviderName != "" {
+					provider = thread.Session.ProviderName
+				}
+				effort, _ := modelEffort(thread.ModelSelection.Options)
+				// The shell API deliberately omits provider resume identifiers.
+				// Re-read them after the earlier transaction so a newly started
+				// Claude thread can still deduplicate its native transcript.
+				var sessionID, providerID string
+				identityErr := db.QueryRowContext(ctx, `SELECT COALESCE(provider_session_id,''),COALESCE(provider_thread_id,'') FROM projection_thread_sessions WHERE thread_id=?`, thread.ID).Scan(&sessionID, &providerID)
+				if identityErr != nil && !errors.Is(identityErr, sql.ErrNoRows) {
+					return c.unavailable(now, "T3 provider identities unavailable")
+				}
+				rows = append(rows, sessions.Summary{ID: c.prefix() + thread.ID, Source: "t3", Name: thread.Title,
+					Project: thread.Project, Cwd: thread.Cwd, StartedAt: parseTime(thread.CreatedAt), LastActivity: parseTime(thread.UpdatedAt),
+					Provider: provider, ProviderSessionID: sessionID, ProviderThreadID: providerID,
+					Model: thread.ModelSelection.Model, ThinkingLevel: effort, Status: status, Active: active})
+			}
+		}
+	}
 	seen := map[string]bool{}
 	stale := 0
 	for _, row := range rows {
@@ -138,7 +207,14 @@ func (c *Collector) Poll() sessions.Snapshot {
 	}
 	c.file, c.rowID, c.activities = info, rowID, next
 	health := sessions.SourceHealth{Source: "t3", Path: c.path, State: "healthy", LastSuccessAt: now}
-	if stale > 0 {
+	if runtimeError != "" {
+		health.State, health.Error = "unavailable", runtimeError
+		if len(c.last.Sources) > 0 {
+			health.LastSuccessAt = c.last.Sources[0].LastSuccessAt
+		} else {
+			health.LastSuccessAt = time.Time{}
+		}
+	} else if stale > 0 {
 		health.State = "stale"
 		health.Error = fmt.Sprintf("%d quiet running thread(s); liveness unavailable", stale)
 	}

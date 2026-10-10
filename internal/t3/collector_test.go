@@ -26,7 +26,9 @@ func fixture(t *testing.T) (*sql.DB, *Collector, time.Time) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "state.sqlite")
 	db := createDB(t, path)
-	c := New(path, time.Minute)
+	c := New(path, time.Minute, "")
+	// These fixtures isolate SQLite metadata parsing; live authority is tested separately.
+	c.runtime = nil
 	now := time.Date(2026, 10, 10, 1, 0, 0, 0, time.UTC)
 	c.now = func() time.Time { return now }
 	return db, c, now
@@ -172,7 +174,8 @@ func TestReadOnlyFailureRecoveryAndSchemaChange(t *testing.T) {
 	if c.Poll().ActiveSessions != 1 {
 		t.Fatal("schema recovery")
 	}
-	missing := New(filepath.Join(t.TempDir(), "missing.sqlite"), time.Minute)
+	missing := New(filepath.Join(t.TempDir(), "missing.sqlite"), time.Minute, "")
+	missing.runtime = nil
 	if missing.Poll().Sources[0].State != "unavailable" {
 		t.Fatal("missing source appeared healthy")
 	}
@@ -237,7 +240,9 @@ func TestReadOnlyPathWithURICharacters(t *testing.T) {
 	db := createDB(t, path)
 	now := time.Now()
 	thread(t, db, "one", now)
-	snap := New(path, time.Minute).Poll()
+	c := New(path, time.Minute, "")
+	c.runtime = nil
+	snap := c.Poll()
 	if len(snap.Sessions) != 1 || snap.ActiveSessions != 1 || snap.Sources[0].State != "healthy" {
 		t.Fatalf("escaped native path: %+v", snap.Sources)
 	}
@@ -326,7 +331,8 @@ func TestDefaultDetectsV2OnUpgradeAndNeverFallsBackToFrozenV1(t *testing.T) {
 		t.Fatalf("upgrade: %+v", snap)
 	}
 	// An explicitly selected legacy environment remains independently monitorable.
-	explicit := New(filepath.Join(filepath.Dir(v2path), "state.sqlite"), time.Minute)
+	explicit := New(filepath.Join(filepath.Dir(v2path), "state.sqlite"), time.Minute, "")
+	explicit.runtime = nil
 	explicit.now = c.now
 	if explicit.Poll().ActiveSessions != 1 {
 		t.Fatal("explicit V1 instance lost")
