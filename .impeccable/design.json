@@ -1,0 +1,173 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-10T22:55:04Z",
+  "title": "Design System: Agent Fleet Dashboard",
+  "extensions": {
+    "colorMeta": {
+      "gold": { "role": "primary", "displayName": "Signal Gold", "canonical": "#ffd700", "oklch": "oklch(88.7% 0.182 95.3)", "cssVar": "--gold", "contrastOnCard": "13.86:1", "tonalRamp": ["#100b00", "#2d2400", "#4f4103", "#736008", "#998110", "#c2a300", "#eac724", "#ffefb1"] },
+      "gold-dim": { "role": "primary", "displayName": "Burnished Gold", "canonical": "#b89b23", "oklch": "oklch(69.6% 0.133 94.3)", "cssVar": "--gold-dim", "contrastOnCard": "7.17:1", "tonalRamp": ["#100a00", "#2e2400", "#4f4103", "#736009", "#9a8012", "#c0a32f", "#e5c859", "#ffefb5"] },
+      "forecast-fill": { "role": "primary", "displayName": "Forecast Gold", "canonical": "rgba(255, 215, 0, .14)", "note": "Runway forecast segment up to the limit; outlined with forecast-edge." },
+      "forecast-edge": { "role": "primary", "displayName": "Forecast Edge", "canonical": "rgba(184, 155, 35, .7)", "note": "1px inset outline of the forecast segment." },
+      "ember": { "role": "secondary", "displayName": "Ember", "canonical": "#ff7a4d", "oklch": "oklch(72.7% 0.173 39.0)", "cssVar": "--ember (scoped to .usage-section)", "contrastOnCard": "7.54:1", "note": "Usage & Balances only: past-the-limit forecasts and measurements, and collector-failure labels.", "tonalRamp": ["#1e0100", "#451100", "#742200", "#a63603", "#d45324", "#fd784b", "#ffb59c", "#ffe9e2"] },
+      "ember-dim": { "role": "secondary", "displayName": "Ember Edge", "canonical": "#c2603f", "oklch": "oklch(60.1% 0.134 39.0)", "cssVar": "--ember-dim (scoped to .usage-section)", "contrastOnCard": "4.66:1", "note": "Overrun segment outline only; not a text color.", "tonalRamp": ["#1e0100", "#451100", "#742200", "#9e3f1e", "#c46241", "#eb8563", "#ffb49c", "#fee9e3"] },
+      "overrun-fill": { "role": "secondary", "displayName": "Ember Overrun", "canonical": "rgba(255, 122, 77, .32)", "note": "Runway segment from the 100% line to the projected end; masked to fade past 125%." },
+      "bg": { "role": "neutral", "displayName": "Page Black", "canonical": "#050505", "oklch": "oklch(11.5% 0.000 89.9)", "cssVar": "--bg", "tonalRamp": ["#0b0b0b", "#252525", "#424242", "#616161", "#828282", "#a5a5a5", "#c9c9c9", "#eeeeee"] },
+      "group-head": { "role": "neutral", "displayName": "Header Black", "canonical": "#080808", "oklch": "oklch(13.4% 0.000 89.9)", "tonalRamp": ["#0b0b0b", "#252525", "#424242", "#616161", "#828282", "#a5a5a5", "#c9c9c9", "#eeeeee"] },
+      "subrow": { "role": "neutral", "displayName": "Output Black", "canonical": "#0b0b0a", "oklch": "oklch(14.9% 0.002 106.7)", "tonalRamp": ["#0b0b0a", "#252524", "#424241", "#616160", "#828281", "#a5a5a4", "#c9c9c8", "#eeeeed"] },
+      "card": { "role": "neutral", "displayName": "Panel Black", "canonical": "#0d0d0d", "oklch": "oklch(15.9% 0.000 89.9)", "cssVar": "--card", "tonalRamp": ["#0b0b0b", "#252525", "#424242", "#616161", "#828282", "#a5a5a5", "#c9c9c9", "#eeeeee"] },
+      "card-border": { "role": "neutral", "displayName": "Hairline", "canonical": "#262626", "oklch": "oklch(26.9% 0.000 89.9)", "cssVar": "--card-border", "tonalRamp": ["#0b0b0b", "#252525", "#424242", "#616161", "#828282", "#a5a5a5", "#c9c9c9", "#eeeeee"] },
+      "track": { "role": "neutral", "displayName": "Runway Track", "canonical": "#1d1c18", "oklch": "oklch(22.6% 0.008 95.4)", "cssVar": "--track (scoped to .usage-section)", "tonalRamp": ["#0c0b08", "#262521", "#43423d", "#62615c", "#84827d", "#a6a5a0", "#cac9c4", "#f0eee9"] },
+      "text": { "role": "neutral", "displayName": "Parchment", "canonical": "#e8e4d8", "oklch": "oklch(91.9% 0.017 91.6)", "cssVar": "--text", "contrastOnCard": "15.29:1", "tonalRamp": ["#0e0b04", "#28251c", "#454238", "#656157", "#868277", "#a9a59a", "#cdc9bd", "#f2eee2"] },
+      "muted": { "role": "neutral", "displayName": "Ash", "canonical": "#8a8578", "oklch": "oklch(61.7% 0.020 89.4)", "cssVar": "--muted", "contrastOnCard": "5.28:1", "tonalRamp": ["#0e0b03", "#29251a", "#464236", "#666155", "#878275", "#aaa597", "#cec9bb", "#f4eee0"] },
+      "muted-light": { "role": "neutral", "displayName": "Light Ash", "canonical": "#aaa596", "oklch": "oklch(72.2% 0.022 91.6)", "contrastOnCard": "7.90:1", "note": "Reused literal in herdr.css, not a custom property.", "tonalRamp": ["#0e0b02", "#292519", "#464235", "#666153", "#878274", "#aaa596", "#cec9b9", "#f4eede"] },
+      "limit-line": { "role": "neutral", "displayName": "Limit Line", "canonical": "rgba(138, 133, 120, .55)", "note": "1px vertical rule at the 100% mark of every runway bar." },
+      "active-wash": { "role": "neutral", "displayName": "Active Wash", "canonical": "rgba(255, 215, 0, .07)", "note": "Active session row tint; a 22% gold flash fades over 1.2s when a row changes." },
+      "state-working": { "role": "tertiary", "displayName": "Working Green", "canonical": "#7ce3a3", "oklch": "oklch(83.7% 0.133 155.0)", "contrastOnCard": "12.38:1", "tonalRamp": ["#001004", "#002e16", "#01502b", "#067441", "#2b995e", "#55bd80", "#7ce3a3", "#c7fed9"] },
+      "state-error": { "role": "tertiary", "displayName": "Error Coral", "canonical": "#ffab91", "oklch": "oklch(81.7% 0.106 37.9)", "contrastOnCard": "10.63:1", "tonalRamp": ["#1e0100", "#461000", "#6f2811", "#934932", "#b86a52", "#de8d74", "#feb59e", "#ffe9e3"] },
+      "pulse-green": { "role": "tertiary", "displayName": "Phosphor Green", "canonical": "#32ff7e", "oklch": "oklch(87.8% 0.231 149.8)", "contrastOnScope": "14.57:1", "tonalRamp": ["#001002", "#002e0f", "#055022", "#0d7535", "#179c49", "#0ac55c", "#03f070", "#c8ffd1"] },
+      "pulse-label": { "role": "tertiary", "displayName": "Phosphor Label", "canonical": "#7ee8a6", "oklch": "oklch(85.0% 0.136 154.9)", "tonalRamp": ["#001004", "#002e16", "#06502c", "#0f7442", "#279a5d", "#52be7e", "#79e3a2", "#c6ffd8"] },
+      "pulse-screen": { "role": "tertiary", "displayName": "Scope Black", "canonical": "#000603", "oklch": "oklch(10.8% 0.023 165.4)", "tonalRamp": ["#030e09", "#1b2922", "#37463f", "#56665e", "#76877f", "#99aaa2", "#bccec6", "#e1f4eb"] },
+      "pulse-border": { "role": "tertiary", "displayName": "Scope Rim", "canonical": "#123c24", "oklch": "oklch(31.9% 0.064 155.1)", "tonalRamp": ["#001004", "#022e17", "#234c33", "#436c51", "#638e72", "#86b194", "#a9d6b7", "#cefcdc"] },
+      "chip-working-bg": { "role": "tertiary", "displayName": "Working Chip Tint", "canonical": "#29230c", "oklch": "oklch(25.7% 0.038 94.9)", "tonalRamp": ["#100b00", "#2b250e", "#48422a", "#686149", "#898269", "#aca58b", "#d1c9ae", "#f6efd2"] },
+      "chip-working-text": { "role": "tertiary", "displayName": "Working Chip Ink", "canonical": "#ffe57b", "oklch": "oklch(92.2% 0.129 95.9)", "contrastOnOwnTint": "12.50:1", "tonalRamp": ["#100b00", "#2d2500", "#4e4101", "#726004", "#998108", "#bda435", "#e2c95e", "#ffefb0"] },
+      "chip-blocked-bg": { "role": "tertiary", "displayName": "Blocked Chip Tint", "canonical": "#3a1914", "oklch": "oklch(26.0% 0.053 30.0)", "tonalRamp": ["#1d0201", "#3b1a15", "#5b3731", "#7d564f", "#a0776f", "#c49991", "#eabdb5", "#ffe9e5"] },
+      "chip-blocked-text": { "role": "tertiary", "displayName": "Blocked Chip Ink", "canonical": "#ffb2a5", "oklch": "oklch(83.3% 0.093 29.8)", "contrastOnOwnTint": "9.15:1", "tonalRamp": ["#210000", "#480b06", "#6b2b23", "#8e4b41", "#b36c61", "#d98f83", "#fdb4a8", "#ffe9e5"] },
+      "chip-done-bg": { "role": "tertiary", "displayName": "Done Chip Tint", "canonical": "#142d20", "oklch": "oklch(27.2% 0.040 159.5)", "tonalRamp": ["#001006", "#122b1e", "#2f493a", "#4e6859", "#6e8a7a", "#90ad9c", "#b4d2c0", "#d9f7e5"] },
+      "chip-done-text": { "role": "tertiary", "displayName": "Done Chip Ink", "canonical": "#a1dfb3", "oklch": "oklch(85.0% 0.088 153.4)", "contrastOnOwnTint": "9.62:1", "tonalRamp": ["#001004", "#002e14", "#0f4f2b", "#347049", "#569269", "#79b58b", "#9ddaaf", "#c6ffd6"] },
+      "chip-idle-bg": { "role": "tertiary", "displayName": "Idle Chip Tint", "canonical": "#1b2433", "oklch": "oklch(25.9% 0.031 260.4)", "tonalRamp": ["#040b18", "#1c2534", "#384253", "#576273", "#788396", "#9aa6b9", "#becade", "#e6effe"] },
+      "chip-idle-text": { "role": "tertiary", "displayName": "Idle Chip Ink", "canonical": "#b9ccee", "oklch": "oklch(84.2% 0.052 262.1)", "contrastOnOwnTint": "9.60:1", "tonalRamp": ["#020921", "#17253e", "#33425e", "#51627f", "#7183a2", "#93a6c6", "#b7caec", "#e6effe"] },
+      "chip-neutral-bg": { "role": "tertiary", "displayName": "Unknown Chip Tint", "canonical": "#222222", "oklch": "oklch(25.2% 0.000 89.9)", "tonalRamp": ["#0b0b0b", "#252525", "#424242", "#616161", "#828282", "#a5a5a5", "#c9c9c9", "#eeeeee"] },
+      "chip-neutral-text": { "role": "tertiary", "displayName": "Unknown Chip Ink", "canonical": "#bbbbbb", "oklch": "oklch(79.2% 0.000 89.9)", "contrastOnOwnTint": "8.29:1", "tonalRamp": ["#0b0b0b", "#252525", "#424242", "#616161", "#828282", "#a5a5a5", "#c9c9c9", "#eeeeee"] }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Display", "purpose": "Pulse active-session count only, phosphor green with glow." },
+      "headline": { "displayName": "Headline", "purpose": "Page title, uppercase, Signal Gold." },
+      "title": { "displayName": "Title", "purpose": "Collapsible section titles, uppercase, Signal Gold." },
+      "figure-lead": { "displayName": "Figure Lead", "purpose": "Lead runway row figures and balance amounts." },
+      "verdict": { "displayName": "Verdict", "purpose": "One-line answer beside a section title." },
+      "group-label": { "displayName": "Group Label", "purpose": "Provider names in gold group header rows." },
+      "body": { "displayName": "Body", "purpose": "Runway rows, balances, failure lists." },
+      "body-dense": { "displayName": "Body Dense", "purpose": "Session metadata, notes, freshness stamps, footers." },
+      "label": { "displayName": "Label", "purpose": "Uppercase column heads and in-panel row labels." }
+    },
+    "shadows": [
+      { "name": "scope-glow", "value": "inset 0 0 24px rgba(0, 255, 102, .06), 0 0 12px rgba(0, 255, 102, .04)", "purpose": "Pulse panel rim only." },
+      { "name": "phosphor-bloom", "value": "drop-shadow(0 0 4px rgba(50, 255, 126, .72))", "purpose": "Pulse trace filter only; 2px at .45 under reduced motion." },
+      { "name": "phosphor-text", "value": "0 0 8px rgba(50, 255, 126, .7)", "purpose": "Pulse readout text-shadow only." }
+    ],
+    "motion": [
+      { "name": "chevron-rotate", "value": "transform .15s ease-out", "purpose": "Section and group chevrons rotate -90deg when collapsed; none under reduced motion." },
+      { "name": "live-dot", "value": "pulse 2s infinite (header), 1.5s (row live dot)", "purpose": "Opacity breathing 1 to .3 on live indicators; off under reduced motion." },
+      { "name": "row-flash", "value": "row-flash 1.2s ease-out", "purpose": "A changed session row flashes 22% gold and fades." },
+      { "name": "pulse-cursor", "value": "breathe 1.8s ease-in-out infinite; beat .52s ease-out", "purpose": "Pulse cursor glow; off under reduced motion." }
+    ],
+    "breakpoints": [
+      { "name": "runway-stack", "value": "820px", "purpose": "Runway rows become two-column cards; column heads hide." },
+      { "name": "session-narrow", "value": "680px", "purpose": "Session table keeps computer, title, model." },
+      { "name": "usage-verdict-wrap", "value": "640px", "purpose": "Usage verdict wraps below the section title." },
+      { "name": "herdr-stack", "value": "600px", "purpose": "Herdr rows restack; selects go full width." },
+      { "name": "minimum", "value": "390px", "purpose": "Smallest supported width." }
+    ]
+  },
+  "components": [
+    {
+      "name": "Section Toggle",
+      "kind": "nav",
+      "refersTo": "section-toggle",
+      "description": "Full-width collapsible section title with a rotating chevron and a right-aligned verdict or hint.",
+      "html": "<button class=\"ds-toggle\" aria-expanded=\"true\"><svg class=\"ds-chev\" viewBox=\"0 0 12 12\" aria-hidden=\"true\"><path d=\"m2 4 4 4 4-4\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\"/></svg>Usage &amp; Balances<span class=\"ds-verdict\">Codex weekly runs out in 1d 6h</span><span class=\"ds-fresh\">updated 41s ago</span></button>",
+      "css": ".ds-toggle { width: 100%; display: flex; align-items: center; gap: 8px; background: none; border: none; border-bottom: 1px solid var(--card-border, #262626); padding: 10px 2px; color: var(--gold, #ffd700); font-family: \"Cascadia Code\", \"JetBrains Mono\", ui-monospace, Consolas, monospace; font-size: 14px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; text-align: left; cursor: pointer; } .ds-chev { width: 12px; height: 12px; flex: none; color: var(--gold-dim, #b89b23); transition: transform .15s ease-out; } .ds-toggle[aria-expanded=\"false\"] .ds-chev { transform: rotate(-90deg); } .ds-verdict { margin-left: 10px; color: var(--ember, #ff7a4d); font-size: 13px; letter-spacing: 0; text-transform: none; font-variant-numeric: tabular-nums; } .ds-fresh { margin-left: auto; color: var(--muted, #8a8578); font-size: 11px; font-weight: 400; letter-spacing: 0; text-transform: none; } .ds-toggle:hover .ds-chev { color: var(--gold, #ffd700); } .ds-toggle:focus-visible { outline: 2px solid var(--gold, #ffd700); outline-offset: 3px; }"
+    },
+    {
+      "name": "Runway Board",
+      "kind": "custom",
+      "refersTo": "board",
+      "description": "Signature component: provider group header plus quota rows on a shared 0-125% scale with the limit line at 80% of the bar.",
+      "html": "<div class=\"ds-board\"><div class=\"ds-ghead\">OpenCode Go <span class=\"ds-gsum\">limit reached</span></div><div class=\"ds-row ds-out\"><span>5-hour</span><span class=\"ds-bar\"><span class=\"ds-used\" style=\"left:0;width:80%\"></span><span class=\"ds-over\" style=\"left:80%;width:20%\"></span><span class=\"ds-limit\"></span></span><span class=\"ds-num\">100%</span><span class=\"ds-fc\"><b>160%</b> limit reached</span><span class=\"ds-reset\">49m</span></div><div class=\"ds-row ds-tight\"><span>Weekly</span><span class=\"ds-bar\"><span class=\"ds-used\" style=\"left:0;width:48.8%\"></span><span class=\"ds-fc-seg\" style=\"left:48.8%;width:21.6%\"></span><span class=\"ds-limit\"></span></span><span class=\"ds-num\">61%</span><span class=\"ds-fc\"><b>88%</b> near limit</span><span class=\"ds-reset\">1d 23h</span></div><div class=\"ds-row\"><span>Monthly</span><span class=\"ds-bar\"><span class=\"ds-used\" style=\"left:0;width:9.6%\"></span><span class=\"ds-limit\"></span></span><span class=\"ds-num\">12%</span><span class=\"ds-fc\">no forecast</span><span class=\"ds-reset\">unknown</span></div></div>",
+      "css": ".ds-board { border: 1px solid var(--card-border, #262626); border-radius: 4px; background: var(--card, #0d0d0d); color: var(--text, #e8e4d8); font-family: \"Cascadia Code\", \"JetBrains Mono\", ui-monospace, Consolas, monospace; font-size: 12px; font-variant-numeric: tabular-nums; } .ds-ghead { min-height: 40px; display: flex; align-items: center; gap: 10px; padding: 0 14px; background: #080808; color: var(--gold, #ffd700); font-weight: 600; letter-spacing: .04em; } .ds-gsum { color: var(--ember, #ff7a4d); font-weight: 400; letter-spacing: 0; } .ds-row { display: grid; grid-template-columns: minmax(80px, 1.1fr) minmax(140px, 2.4fr) 56px minmax(140px, 1.2fr) 64px; gap: 0 18px; align-items: center; min-height: 32px; padding: 0 14px 0 36px; } .ds-bar { position: relative; height: 8px; background: var(--track, #1d1c18); border-radius: 1px; } .ds-bar > span { position: absolute; top: 0; bottom: 0; } .ds-used { background: var(--gold-dim, #b89b23); } .ds-tight .ds-used { background: var(--gold, #ffd700); } .ds-out .ds-used { background: var(--ember, #ff7a4d); } .ds-fc-seg { background: rgba(255, 215, 0, .14); outline: 1px solid rgba(184, 155, 35, .7); outline-offset: -1px; } .ds-over { background: rgba(255, 122, 77, .32); outline: 1px solid var(--ember-dim, #c2603f); outline-offset: -1px; -webkit-mask-image: linear-gradient(90deg, #000 60%, transparent); mask-image: linear-gradient(90deg, #000 60%, transparent); } .ds-bar > .ds-limit { left: 80%; top: -12px; bottom: -12px; width: 1px; background: rgba(138, 133, 120, .55); } .ds-num { text-align: right; font-weight: 600; } .ds-fc { color: var(--muted, #8a8578); } .ds-fc b { color: var(--text, #e8e4d8); } .ds-tight .ds-num, .ds-tight .ds-fc b { color: var(--gold, #ffd700); } .ds-out .ds-num, .ds-out .ds-fc, .ds-out .ds-fc b { color: var(--ember, #ff7a4d); } .ds-reset { text-align: right; color: var(--muted, #8a8578); } .ds-row:hover { background: rgba(255, 215, 0, .07); }"
+    },
+    {
+      "name": "Failure Disclosure",
+      "kind": "custom",
+      "refersTo": "board",
+      "description": "One-line details row at the foot of a board naming providers that are not reporting; expands to one line per failure.",
+      "html": "<details class=\"ds-fail\"><summary><b>Not reporting:</b> OpenCode Zen</summary><ul><li><b>OpenCode Zen</b> couldn't read balance (parse failed)</li></ul></details>",
+      "css": ".ds-fail { border-top: 1px solid var(--card-border, #262626); padding: 0 14px; background: var(--card, #0d0d0d); color: var(--muted, #8a8578); font-family: \"Cascadia Code\", \"JetBrains Mono\", ui-monospace, Consolas, monospace; font-size: 12px; } .ds-fail summary { min-height: 36px; padding: 8px 0; cursor: pointer; width: fit-content; } .ds-fail summary b { color: var(--ember, #ff7a4d); font-weight: 600; } .ds-fail summary:hover b { color: var(--text, #e8e4d8); } .ds-fail summary:focus-visible { outline: 2px solid var(--gold, #ffd700); outline-offset: -2px; } .ds-fail ul { list-style: none; padding: 0 0 10px 22px; } .ds-fail li b { color: var(--text, #e8e4d8); font-weight: 600; }"
+    },
+    {
+      "name": "Pager Button",
+      "kind": "button",
+      "refersTo": "pager-button",
+      "description": "Small bordered button for paging the session table.",
+      "html": "<button class=\"ds-pager\">next</button>",
+      "css": ".ds-pager { background: var(--card, #0d0d0d); border: 1px solid var(--card-border, #262626); color: var(--gold-dim, #b89b23); border-radius: 3px; padding: 2px 10px; cursor: pointer; font-family: \"Cascadia Code\", \"JetBrains Mono\", ui-monospace, Consolas, monospace; font-size: 12px; } .ds-pager:hover:not(:disabled) { color: var(--gold, #ffd700); border-color: var(--gold-dim, #b89b23); } .ds-pager:focus-visible { outline: 2px solid var(--gold, #ffd700); outline-offset: 3px; } .ds-pager:disabled { opacity: .35; cursor: default; }"
+    },
+    {
+      "name": "Filter Select",
+      "kind": "input",
+      "refersTo": "select",
+      "description": "Native select used for Herdr machine and state filters.",
+      "html": "<label class=\"ds-field\">State <select class=\"ds-select\"><option>All states</option><option>Blocked</option></select></label>",
+      "css": ".ds-field { display: flex; align-items: center; gap: 8px; font-family: \"Cascadia Code\", \"JetBrains Mono\", ui-monospace, Consolas, monospace; font-size: 12px; color: #aaa596; } .ds-select { min-height: 36px; padding: 6px 28px 6px 10px; color: var(--text, #e8e4d8); background: var(--card, #0d0d0d); border: 1px solid var(--card-border, #262626); border-radius: 4px; font: inherit; cursor: pointer; } .ds-select:hover { border-color: var(--gold-dim, #b89b23); } .ds-select:focus-visible { outline: 2px solid var(--gold, #ffd700); outline-offset: 3px; }"
+    },
+    {
+      "name": "State Chip",
+      "kind": "chip",
+      "refersTo": "state-chip-working",
+      "description": "Tinted pill naming a Herdr agent state.",
+      "html": "<span class=\"ds-chip ds-working\">working</span> <span class=\"ds-chip ds-blocked\">blocked</span> <span class=\"ds-chip ds-done\">done</span> <span class=\"ds-chip ds-idle\">idle</span> <span class=\"ds-chip\">unknown</span>",
+      "css": ".ds-chip { display: inline-block; padding: 4px 7px; border-radius: 3px; background: #222222; color: #bbbbbb; font-family: \"Cascadia Code\", \"JetBrains Mono\", ui-monospace, Consolas, monospace; font-size: 12px; } .ds-working { background: #29230c; color: #ffe57b; } .ds-blocked { background: #3a1914; color: #ffb2a5; } .ds-done { background: #142d20; color: #a1dfb3; } .ds-idle { background: #1b2433; color: #b9ccee; }"
+    },
+    {
+      "name": "Machine Tile",
+      "kind": "nav",
+      "refersTo": "machine-tile",
+      "description": "Link tile to a machine's browser terminal in the Herdr section.",
+      "html": "<a class=\"ds-tile\" href=\"#\"><span><strong>mini</strong><small>3 panes · 2 working</small></span><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"m5 7 5 5-5 5m8 0h6\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"/></svg></a>",
+      "css": ".ds-tile { display: flex; align-items: center; justify-content: space-between; gap: 24px; min-height: 58px; max-width: 260px; padding: 10px 14px; border: 1px solid var(--card-border, #262626); border-radius: 4px; background: var(--card, #0d0d0d); color: var(--text, #e8e4d8); text-decoration: none; font-family: \"Cascadia Code\", \"JetBrains Mono\", ui-monospace, Consolas, monospace; } .ds-tile strong { font-size: 14px; color: var(--gold, #ffd700); } .ds-tile small { display: block; margin-top: 4px; font-size: 11px; color: #aaa596; line-height: 1.4; } .ds-tile svg { width: 18px; height: 18px; flex-shrink: 0; color: var(--gold, #ffd700); } .ds-tile:hover { background: #18170f; border-color: var(--gold-dim, #b89b23); } .ds-tile:focus-visible { outline: 2px solid var(--gold, #ffd700); outline-offset: 3px; }"
+    },
+    {
+      "name": "Pulse Panel",
+      "kind": "card",
+      "refersTo": "pulse-panel",
+      "description": "Green phosphor instrument; its palette and glows are not reused elsewhere.",
+      "html": "<div class=\"ds-pulse\"><span class=\"ds-pcount\">4</span><span class=\"ds-plabel\">active sessions</span></div>",
+      "css": ".ds-pulse { position: relative; min-height: 184px; padding: 12px 14px; display: flex; align-items: baseline; gap: 9px; background: #000603; border: 1px solid #123c24; border-radius: 4px; box-shadow: inset 0 0 24px rgba(0, 255, 102, .06), 0 0 12px rgba(0, 255, 102, .04); font-family: \"Cascadia Code\", \"JetBrains Mono\", ui-monospace, Consolas, monospace; text-shadow: 0 0 8px rgba(50, 255, 126, .7); } .ds-pcount { color: #32ff7e; font-size: 34px; font-weight: 700; line-height: 1; } .ds-plabel { color: #7ee8a6; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Night-Shift Console",
+    "overview": "The dashboard is an operator's console read between agent runs: near-black glass, one gold voice, one monospace face, and dense rows of tabular figures. Everything is a bordered panel on a black page, and every panel is a table at heart: uppercase column heads in muted ink, gold group header rows, then data rows at 11-13px. Density is high on purpose. Franz reads it on a desktop tab, in T3 Code's narrow panel and on a phone, so the layout reflows instead of hiding meaning, and the same row grammar holds at 390px.\n\nColor carries state, never decoration. Gold marks identity and measured values; dim gold is the at-rest fill; translucent gold is a forecast. Warm ember appears only when something has gone past a plan limit or a collector has failed. The Pulse monitor is the one place the system leaves gold: it is a separate green phosphor instrument, and it stays green (a PRODUCT.md brand commitment).\n\nDepth comes from tonal steps between near-blacks and 1px hairlines, not shadows. Motion is small and functional: chevrons rotate, live dots breathe, a changed row flashes gold once. All of it switches off under reduced motion.",
+    "keyCharacteristics": [
+      "Gold (#ffd700) on near-black (#050505), one monospace stack, uppercase section titles.",
+      "Tables everywhere: bordered #0d0d0d panels, #080808 gold group header rows, 10px uppercase column heads.",
+      "Tabular numerals for every figure that can change.",
+      "Flat, hairline-bordered surfaces; only the Pulse instrument glows.",
+      "State is always spelled out in words as well as color (\"limit reached\", \"no reading\", \"refresh failed\")."
+    ],
+    "rules": [
+      { "name": "The Ember Means Past-the-Line Rule", "body": "Ember is reserved for Usage & Balances, and there only for a forecast or measurement past the plan limit and for collector-failure labels. It never decorates, never marks \"tight\" (that is gold), and other sections keep their own error coral.", "section": "colors" },
+      { "name": "The Gold Ladder Rule", "body": "Measured use climbs a fixed ladder: Burnished Gold at rest, Signal Gold when tight (85% or more measured or forecast) or at risk, Ember only at 100%. A forecast is always translucent, never solid.", "section": "colors" },
+      { "name": "The Green Belongs to Pulse Rule", "body": "Phosphor green is the Pulse instrument's own palette. Outside Pulse, green appears only as a state word color (working, done); it never becomes an accent.", "section": "colors" },
+      { "name": "The One Face Rule", "body": "Every glyph on the page is the monospace stack. Contrast comes from weight, size, case and color.", "section": "typography" },
+      { "name": "The Tabular Figures Rule", "body": "Any number that refreshes (percentages, durations, counts, money) is set with `font-variant-numeric: tabular-nums` so columns stay aligned across the 5-second poll.", "section": "typography" },
+      { "name": "The Hairline, Not Shadow Rule", "body": "Separation is a 1px `card-border` line or a one-step tonal change. Glow belongs to the Pulse instrument and nowhere else.", "section": "elevation" }
+    ],
+    "dos": [
+      "**Do** put every new section in a Section Toggle plus a bordered Panel Black board with a Hairline border and 4px corners.",
+      "**Do** use Signal Gold (#ffd700) for identity labels and urgent figures, Burnished Gold (#b89b23) for at-rest fills, and Ash (#8a8578) as the dimmest text color.",
+      "**Do** set refreshing numbers in tabular figures and state every condition in words as well as color.",
+      "**Do** keep Ember (#ff7a4d) to past-the-limit forecasts and measurements and to collector-failure labels inside Usage & Balances.",
+      "**Do** keep missing data explicit: an Ash em dash plus \"no reading\" or \"unknown\", never a healthy-looking zero.",
+      "**Do** give every control a 2px gold focus outline and turn off chevron, dot and glow animation under `prefers-reduced-motion`."
+    ],
+    "donts": [
+      "**Don't** add a second typeface or download web fonts; the monospace stack is the identity.",
+      "**Don't** use drop shadows or glows on boards, buttons or rows; glow belongs to the Pulse instrument.",
+      "**Don't** use green as an accent or recolor the Pulse monitor gold.",
+      "**Don't** use Ember for \"near limit\" or for decoration; near limit is gold.",
+      "**Don't** set readable text dimmer than Ash (#8a8578, 5.28:1 on #0d0d0d).",
+      "**Don't** render quota windows as one dial or card per provider; quota windows share one runway scale and one limit line."
+    ]
+  }
+}
