@@ -35,14 +35,14 @@ const (
 	KindUnknown = "unknown" // no data source exists yet
 )
 
-// Gauge is one usage window: UsedPercent is 0-100 used. The dashboard fills
+// Gauge is one usage window: UsedPercent is 0-100 used, or nil when absent. The dashboard fills
 // the gauge with UsedPercent on the statusline's green→red scale and, when
 // the window timing allows it, shows ProjectedEnd — where usage lands at the
 // reset if the current pace holds (can exceed 100).
 type Gauge struct {
 	Label         string    `json:"label"`
-	UsedPercent   float64   `json:"usedPercent"`
-	ResetAt       time.Time `json:"resetAt,omitempty"`
+	UsedPercent   *float64  `json:"usedPercent"`
+	ResetAt       time.Time `json:"resetAt,omitzero"`
 	WindowSeconds float64   `json:"windowSeconds,omitempty"`
 	ProjectedEnd  *float64  `json:"projectedEnd,omitempty"`
 }
@@ -137,6 +137,19 @@ func (s *Store) refresh(ctx context.Context) {
 		Cards:       s.fetcher.FetchAll(ctx),
 	}
 	s.mu.Lock()
+	previous := make(map[string]Card, len(s.snapshot.Cards))
+	for _, card := range s.snapshot.Cards {
+		previous[card.Key] = card
+	}
+	for i, card := range snapshot.Cards {
+		old, ok := previous[card.Key]
+		if card.Error != "" && len(card.Gauges) == 0 && card.BalanceUSD == nil && ok && old.Kind == card.Kind && (len(old.Gauges) > 0 || old.BalanceUSD != nil) {
+			// Keep the reading's original age, including through repeated failures.
+			// Snapshots handed to callers remain immutable.
+			card.Gauges, card.BalanceUSD, card.FetchedAt = old.Gauges, old.BalanceUSD, old.FetchedAt
+			snapshot.Cards[i] = card
+		}
+	}
 	s.snapshot = snapshot
 	s.mu.Unlock()
 	s.readyOnce.Do(func() { close(s.ready) })
@@ -296,13 +309,14 @@ func parseCodexWindows(body []byte) ([]Gauge, error) {
 		}
 		gauge := Gauge{Label: windowLabel(duration), WindowSeconds: duration}
 		if usedOK {
-			gauge.UsedPercent = clamp(used, 0, 100)
+			value := clamp(used, 0, 100)
+			gauge.UsedPercent = &value
 		}
 		if resetOK {
 			gauge.ResetAt = time.Unix(int64(resetAt), 0).UTC()
 			// Codex windows roll from the reset time, not a calendar boundary;
 			// projections use the raw percent so >100% readings stay truthful.
-			if p, ok := projectEndPercent(gauge.Label, used, time.Until(gauge.ResetAt).Seconds(), duration, time.Now(), false); ok {
+			if p, ok := projectEndPercent(gauge.Label, used, time.Until(gauge.ResetAt).Seconds(), duration, time.Now(), false); usedOK && ok {
 				gauge.ProjectedEnd = &p
 			}
 		}
@@ -589,9 +603,10 @@ func parseGoWindow(text string, spec goWindowSpec, now time.Time) (Gauge, bool) 
 		segment := text[loc:end]
 		usage, reset := numericField(segment, "usagePercent"), numericField(segment, "resetInSec")
 		if usage != nil && reset != nil && *usage >= 0 && *reset >= 0 && *reset <= spec.duration*2 {
+			value := clamp(*usage, 0, 100)
 			gauge := Gauge{
 				Label:         spec.label,
-				UsedPercent:   clamp(*usage, 0, 100),
+				UsedPercent:   &value,
 				ResetAt:       now.Add(time.Duration(*reset) * time.Second).UTC(),
 				WindowSeconds: spec.duration,
 			}
@@ -924,9 +939,10 @@ func parseAntigravityWindows(body []byte) ([]Gauge, error) {
 		if spec.window == "weekly" {
 			duration = 7 * 86400
 		}
+		value := math.Round(100*(1-b.RemainingFraction)*100) / 100
 		gauge := Gauge{
 			Label:         spec.label,
-			UsedPercent:   math.Round(100*(1-b.RemainingFraction)*100) / 100,
+			UsedPercent:   &value,
 			ResetAt:       resetAt.UTC(),
 			WindowSeconds: float64(duration),
 		}

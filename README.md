@@ -47,13 +47,32 @@ visible even without output, with their thread title, repository and state. Rebo
 last known sessions grayed out.
 
 Above the session grid sits an expandable/collapsible **Usage & Balances**
-section with speedometer cards per provider: Codex (weekly window),
-OpenCode Go (5h / weekly / monthly), and Antigravity (Gemini and 3P pools,
-5h + weekly) show usage *left* on the plan as gold gauges with reset
-countdowns; OpenCode Zen and Moonshot AI show prepaid dollar balances. The
-agent refreshes usage
-every 60s (endpoint `GET /usage`), the server folds it into `/api/fleet`, and
-the gauges read `100 - used_percent` so full-bleed windows read zero.
+section with account-level quota charts: Codex (weekly window), OpenCode Go
+(5h / weekly / monthly), and Antigravity (Gemini and 3P pools, 5h + weekly)
+show **percent used** from 0% to 100%, reset countdowns and forecasts.
+The solid arc represents measured usage; the hollow marker represents the
+forecast at reset. Forecasts above 100% stop at the end of the scale while
+keeping their full value and an “over limit” label. Missing values stay
+unavailable. OpenCode Zen and Moonshot AI retain their prepaid dollar balances.
+The agent refreshes usage every 60s (`GET /usage`), and the server folds it
+into `/api/fleet`. Cards older than three minutes are labeled stale; fetch
+errors retain the last successful quota or balance reading with its original
+fetch timestamp, alongside the current failure. Missing provider usage is
+serialized as null; missing reset times are omitted. Section and card collapse
+preferences persist, and browser refreshes preserve keyboard focus.
+
+These charts adapt the restrained geometry, spacing and theme-driven colors
+of [GPUI Kit charts](https://gpui-kit.com/component/chart/) using HTML and
+inline SVG. They do **not** embed native GPUI components or copy upstream code
+or assets. GPUI Kit is a Rust toolkit; its [WebAssembly guide](https://gpui-kit.com/docs/webassembly/)
+requires a Rust/WASM build, JavaScript loader and canvas rendering with
+WebGPU/WebGL2, and currently targets component showcases. That is additional
+build and startup work for this small embedded page, with DOM accessibility
+requiring separate consideration. The HTML/SVG approach keeps the existing
+Go `embed` delivery, adds no dependency or license obligation, and works in
+modern browsers without GPU support. Values, reset times and forecasts have
+text equivalents and semantic labels; native buttons support keyboard collapse.
+The charts have no animation, including in reduced-motion mode.
 
 The expandable **Pulse** monitor counts recently active Pi, Claude Code, T3 and Hermes sessions
 across the fleet. Pulse and the table use one fleet snapshot, and every counted
