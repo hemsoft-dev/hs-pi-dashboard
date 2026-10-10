@@ -70,6 +70,7 @@ Agent flags:
   -claude-dir string    Claude Code projects dir (default ~/.claude/projects)
   -t3-db string         T3 SQLite path (default ~/.t3/userdata/state.sqlite);
                         repeat for multiple environments, "off" disables
+  -t3-bin string        installed T3 CLI for read-only runtime pairing (default t3)
   -machine string       label reported in the snapshot (default hostname)
   -active-window dur    how long a quiet session counts as active (default 2m)
   -herdr-bin string     installed Herdr executable (default auto-discover)
@@ -92,6 +93,7 @@ func runAgent(args []string) error {
 		t3DBs = append(t3DBs, path)
 		return nil
 	})
+	t3Bin := fs.String("t3-bin", "", "installed T3 CLI for read-only runtime pairing")
 	machine := fs.String("machine", "", "label reported in the snapshot (default hostname)")
 	window := fs.Duration("active-window", 2*time.Minute, "how long a quiet session counts as active")
 	herdrBin := fs.String("herdr-bin", "", "installed Herdr executable (default auto-discover)")
@@ -111,6 +113,7 @@ func runAgent(args []string) error {
 		Dir:          *dir,
 		ClaudeDir:    *claudeDir,
 		T3DBs:        t3DBs,
+		T3Binary:     *t3Bin,
 		Machine:      label,
 		ActiveWindow: *window,
 		HerdrBinary:  *herdrBin,

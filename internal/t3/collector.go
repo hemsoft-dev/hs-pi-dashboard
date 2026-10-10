@@ -1,5 +1,5 @@
-// Package t3 reads T3 Code's local SQLite projections without changing them.
-// It reports metadata and provider counters, never prompts or tool payloads.
+// Package t3 reads T3 Code's local SQLite projections and authenticated live
+// states. It reports metadata and counters, never prompts or tool payloads.
 package t3
 
 import (
@@ -22,6 +22,7 @@ import (
 // Collector owns the incremental activity cache for one T3 environment.
 type Collector struct {
 	path        string
+	runtime     *runtimeSource
 	defaultPath bool
 	window      time.Duration
 	now         func() time.Time
@@ -40,7 +41,7 @@ type activity struct {
 
 // New uses the default T3 userdata path when path is empty. Each configured
 // environment gets its own collector and namespaced thread identities.
-func New(path string, window time.Duration) *Collector {
+func New(path string, window time.Duration, binary string) *Collector {
 	defaultPath := path == ""
 	if path == "" {
 		home, _ := os.UserHomeDir()
@@ -56,7 +57,7 @@ func New(path string, window time.Duration) *Collector {
 	if window <= 0 {
 		window = sessions.DefaultActiveWindow
 	}
-	return &Collector{path: path, defaultPath: defaultPath, window: window, now: time.Now, activities: map[string]*activity{}}
+	return &Collector{path: path, runtime: newRuntime(path, binary), defaultPath: defaultPath, window: window, now: time.Now, activities: map[string]*activity{}}
 }
 
 // Poll reads a consistent projection snapshot. A failed source retains cached
@@ -123,6 +124,51 @@ func (c *Collector) Poll() sessions.Snapshot {
 	if err = tx.Commit(); err != nil {
 		return c.unavailable(now, "T3 database snapshot interrupted")
 	}
+	runtimeError := ""
+	if c.runtime != nil {
+		live, err := c.runtime.snapshot(ctx)
+		if err != nil {
+			runtimeError = err.Error()
+			for i := range rows {
+				rows[i].Active = false
+				rows[i].Status = "unavailable"
+			}
+		} else {
+			states := map[string]liveThread{}
+			for _, thread := range live {
+				states[thread.ID] = thread
+			}
+			for i := range rows {
+				id := strings.TrimPrefix(rows[i].ID, c.prefix())
+				if thread, ok := states[id]; ok {
+					rows[i].Status, rows[i].Active = thread.state()
+					if rows[i].Active {
+						rows[i].TurnCompletedAt = nil
+					}
+					delete(states, id)
+				} else {
+					rows[i].Active = false
+					rows[i].Status = "stopped"
+				}
+			}
+			// A thread may start after the SQLite transaction. Include it from
+			// the live snapshot now; the next poll fills in persisted counters.
+			for _, thread := range live {
+				if _, ok := states[thread.ID]; !ok {
+					continue
+				}
+				status, active := thread.state()
+				provider := thread.ModelSelection.Instance
+				if thread.Session != nil && thread.Session.ProviderName != "" {
+					provider = thread.Session.ProviderName
+				}
+				effort, _ := modelEffort(thread.ModelSelection.Options)
+				rows = append(rows, sessions.Summary{ID: c.prefix() + thread.ID, Source: "t3", Name: thread.Title,
+					Project: thread.Project, Cwd: thread.Cwd, StartedAt: parseTime(thread.CreatedAt), LastActivity: parseTime(thread.UpdatedAt),
+					Provider: provider, Model: thread.ModelSelection.Model, ThinkingLevel: effort, Status: status, Active: active})
+			}
+		}
+	}
 	seen := map[string]bool{}
 	stale := 0
 	for _, row := range rows {
@@ -138,7 +184,14 @@ func (c *Collector) Poll() sessions.Snapshot {
 	}
 	c.file, c.rowID, c.activities = info, rowID, next
 	health := sessions.SourceHealth{Source: "t3", Path: c.path, State: "healthy", LastSuccessAt: now}
-	if stale > 0 {
+	if runtimeError != "" {
+		health.State, health.Error = "unavailable", runtimeError
+		if len(c.last.Sources) > 0 {
+			health.LastSuccessAt = c.last.Sources[0].LastSuccessAt
+		} else {
+			health.LastSuccessAt = time.Time{}
+		}
+	} else if stale > 0 {
 		health.State = "stale"
 		health.Error = fmt.Sprintf("%d quiet running thread(s); liveness unavailable", stale)
 	}

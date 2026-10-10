@@ -88,7 +88,8 @@ balance is inferred. Future Pi streaming support would use an extension.
 
 ## T3 Code collection
 
-Each agent reads `~/.t3/userdata/state.sqlite` in SQLite read-only mode. It collects
+Each agent reads `~/.t3/userdata/state.sqlite` in SQLite read-only mode and verifies
+live states through T3's local `/api/orchestration/shell` endpoint. It collects
 all non-deleted threads across every project in that environment, including closed
 tabs and archived history. T3 rows remain in the payload beyond the transcript
 history cap; the table paginates them. No T3 plugin, agent tool call or open tab is
@@ -102,16 +103,41 @@ also detected and reported unavailable. V2 collection requires a separate schema
 adapter. To intentionally monitor a V1 instance alongside V2, configure its
 `state.sqlite` path explicitly with `-t3-db`.
 
-T3 rows show connecting, working, waiting for approval/input, idle, stopped or error state.
-Pulse counts connecting, working and waiting threads only while their recorded activity is
-within `-active-window`, two minutes by default. A connected provider with no
-active turn is idle. This is recent recorded activity, not a process heartbeat:
-a quiet long-running tool can become stale even while T3 is running. Stale threads
-stay visible with a subdued status and do not count as live. A compact T3 collection
-disclosure opens the stale explanation, source path and failure diagnostics on demand.
-Actual unavailable/offline sources retain a highlighted status in that summary.
-Duration uses the latest turn,
-not the lifetime of the thread.
+T3 rows show connecting, working, monitoring, waiting for approval/input, idle,
+stopped or error state. Pulse counts verified connecting, working, monitoring and
+waiting threads. Quiet tools and background monitoring stay active regardless of
+`-active-window`; that flag still controls native transcript activity. Open,
+snoozed or unsettled threads are not active merely because they exist. The table
+and Pulse use the same agent snapshot on each five-second dashboard refresh.
+Duration uses the latest turn, not the lifetime of the thread.
+
+The agent discovers each environment's loopback origin from the adjacent
+`server-runtime.json`. Under the same OS account, it runs the installed T3 CLI's
+`auth pairing create --base-dir <environment> --ttl 1m --json`, then exchanges
+that one-time credential at `/oauth/token`, requesting only `orchestration:read`.
+It refuses broader tokens, redirects and non-loopback origins. This supported
+auth flow creates T3-managed access records; it does not modify thread projections
+or restart T3. The session token stays in agent memory and is reused until expiry
+or runtime restart. Renewal uses a new local pairing grant; an HTTP 401/403 clears
+the token and retries on the next poll. No token belongs in service arguments,
+environment variables, files, logs or dashboard payloads.
+
+Install a T3 CLI compatible with the running server and expose it on the agent's
+PATH, or pass `-t3-bin /absolute/path/to/t3`. On Windows, use the native `t3.exe`,
+not an npm `.cmd` or PowerShell wrapper. The agent also discovers the native
+binary beside the standard npm launcher. That installation stores it
+under `%APPDATA%\npm\node_modules\t3\node_modules\@t3code\t3-win32-x64\t3.exe`.
+The environment base directory comes from the database path: for
+`~/.t3-server/userdata/state.sqlite`, pairing uses `~/.t3-server`. Separate
+configured environments get separate credentials and stable thread identities.
+
+Database and live requests share a 2.5-second polling deadline. Missing discovery,
+a stopped runtime, failed authentication, timeouts or incompatible responses leave
+T3 metadata visible as unavailable and clear its active count. Fresh or stale
+persisted running metadata cannot keep a dead thread active. Collection retries
+on each poll and recovers without duplicate rows. A compact T3 collection
+disclosure keeps paths and failure details hidden until expanded. Actual
+unavailable/offline sources retain a highlighted status in that summary.
 
 T3 rows start collapsed. Click their title or use Tab followed by Enter/Space to
 expand statistics and any stored assistant output, even when no output exists.
@@ -136,6 +162,7 @@ Configure each environment with a repeated flag, or disable collection explicitl
 ```bash
 ./hs-pi-dashboard agent -addr <tailscale-ip>:8787 -t3-db /path/to/userdata/state.sqlite
 ./hs-pi-dashboard agent -addr <tailscale-ip>:8787 -t3-db /first/state.sqlite -t3-db /second/state.sqlite
+./hs-pi-dashboard agent -addr <tailscale-ip>:8787 -t3-db ~/.t3-server/userdata/state.sqlite -t3-bin /path/to/t3
 ./hs-pi-dashboard agent -addr <tailscale-ip>:8787 -t3-db off
 ```
 

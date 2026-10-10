@@ -18,6 +18,7 @@ import (
 
 // Options configures one agent.
 type Options struct {
+	T3Binary     string        // installed T3 CLI for scoped local pairing; empty = discover t3
 	T3DBs        []string      // T3 environment databases; nil uses ~/.t3/userdata/state.sqlite, "off" disables
 	Addr         string        // listen address, e.g. 100.101.122.39:8787
 	Dir          string        // pi sessions dir; empty = ~/.pi/agent/sessions
@@ -76,7 +77,7 @@ func sessionHandler(opts Options) http.HandlerFunc {
 	seen := map[string]bool{}
 	for _, path := range paths {
 		if path != "off" && !seen[path] {
-			collectors = append(collectors, t3.New(path, opts.ActiveWindow))
+			collectors = append(collectors, t3.New(path, opts.ActiveWindow, opts.T3Binary))
 			seen[path] = true
 		}
 	}
