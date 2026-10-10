@@ -142,9 +142,6 @@ func (c *Collector) Poll() sessions.Snapshot {
 				id := strings.TrimPrefix(rows[i].ID, c.prefix())
 				if thread, ok := states[id]; ok {
 					rows[i].Status, rows[i].Active = thread.state()
-					if rows[i].Active {
-						rows[i].TurnCompletedAt = nil
-					}
 					delete(states, id)
 				} else {
 					rows[i].Active = false

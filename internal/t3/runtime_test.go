@@ -252,3 +252,17 @@ func TestLiveStateMatchesWorkingShelf(t *testing.T) {
 		}
 	}
 }
+
+func TestBackgroundMonitoringRetainsCompletedModelTurnDuration(t *testing.T) {
+	db, c, now := fixture(t)
+	thread(t, db, "monitor", now.Add(-time.Hour))
+	completed := now.Add(-10 * time.Minute)
+	exec(t, db, `UPDATE projection_thread_sessions SET status='ready',active_turn_id=NULL`)
+	exec(t, db, `UPDATE projection_turns SET state='completed',completed_at=?`, completed.Format(time.RFC3339Nano))
+	f, _ := attachRuntime(t, c)
+	f.threads = []liveThread{{ID: "monitor", Session: &liveSession{Status: "ready"}, BackgroundLiveness: "monitoring"}}
+	snap := c.Poll()
+	if snap.ActiveSessions != 1 || snap.Sessions[0].TurnCompletedAt == nil || !snap.Sessions[0].TurnCompletedAt.Equal(completed) {
+		t.Fatal("background monitoring erased the completed model turn")
+	}
+}
