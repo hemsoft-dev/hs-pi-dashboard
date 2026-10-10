@@ -91,39 +91,110 @@
     .pulse-cursor, .pulse-cursor.beat { animation: none; transition: none; }
     .refresh .dot, .live { animation: none; }
   }
-  /* Account-level charts share a quiet scale and readable text at every size. */
-  .usage-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
-  @media (max-width: 980px) {
-    .usage-grid { grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr)); }
+  /* Usage runway board: one row per quota window on a shared 0-125% scale with
+     the plan limit at 100%, so forecasts that cross the limit line up down the
+     column. Ember marks only a forecast past the limit. */
+  .usage-section { --ember: #ff7a4d; --ember-dim: #c2603f; --track: #1d1c18; --limit-at: 80%; }
+  #usage-toggle { flex-wrap: wrap; row-gap: 4px; }
+  #usage-toggle .chev { width: 12px; height: 12px; flex: none; }
+  .usage-summary { flex: 1 1 auto; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; margin-left: 10px;
+    font-size: 13px; letter-spacing: 0; text-transform: none; font-variant-numeric: tabular-nums; }
+  .ufresh { margin-left: auto; color: var(--muted); font-size: 11px; font-weight: 400; }
+  .ufresh.cached { color: var(--ember); }
+  .uverdict { color: var(--text); font-weight: 600; }
+  .uverdict.s-risk, .uverdict.s-out { color: var(--ember); }
+  .uverdict.s-tight { color: var(--gold); }
+  .uboard { border: 1px solid var(--card-border); border-radius: 4px; background: var(--card); font-variant-numeric: tabular-nums; }
+  .ugroups, .urows, .ubals ul, .ufail ul { list-style: none; }
+  .ucols, .urow {
+    display: grid; align-items: center; gap: 0 18px; padding: 0 14px 0 36px;
+    grid-template-columns: minmax(140px, 1.1fr) minmax(180px, 2.4fr) 56px minmax(168px, 1.2fr) 84px;
   }
-  .usage-col { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
-  .ucard { background: var(--card); border: 1px solid var(--card-border); border-radius: 4px; padding: 12px 14px; min-width: 0; }
-  .ucard-head { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }
-  .ucard-label { color: var(--gold); font-weight: 600; font-size: 13px; }
-  .ucard-toggle { min-height: 44px; background: none; border: 0; padding: 4px 0; color: inherit; font: inherit; width: 100%; display: flex; align-items: center; gap: 8px; text-align: left; cursor: pointer; }
-  .ucard-toggle:hover .ucard-label { color: var(--text); }
-  .ucard-toggle:focus-visible { outline: 2px solid var(--gold); outline-offset: 4px; border-radius: 2px; }
-  .ucard .chev { width: 12px; height: 12px; flex: 0 0 auto; color: #aaa398; }
-  .usage-stale { color: #aaa398; font-size: 11px; margin-left: auto; text-align: right; }
-  .ucard-error { display: block; color: #c5b9a8; font-size: 12px; overflow-wrap: anywhere; }
-  .ucard-notice { margin-bottom: 12px; }
-  .gauges { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 144px), 1fr)); gap: 20px 12px; }
-  .gauge { display: flex; flex-direction: column; align-items: center; gap: 6px; min-width: 0; text-align: center; font-variant-numeric: tabular-nums; }
-  .gauge .glabel { color: var(--text); font-size: 12px; font-weight: 600; overflow-wrap: anywhere; }
-  .gauge-dial { position: relative; width: 144px; height: 88px; }
-  .gauge svg { display: block; width: 144px; height: 88px; }
-  .gvalue { position: absolute; inset: 34px 0 auto; color: var(--text); font-size: 26px; font-weight: 600; line-height: 1.15; }
-  .gvalue small { display: block; color: #aaa398; font-size: 11px; font-weight: 400; margin-top: 2px; }
-  .gvalue.unavailable { font-size: 15px; top: 43px; }
-  .greset, .gproj { color: #aaa398; font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
-  .gproj.over { color: #f08b8b; }
-  .forecast-key { display: inline-block; width: 6px; height: 6px; border: 1px solid currentColor; border-radius: 50%; margin-right: 5px; vertical-align: 1px; }
-  .balance { display: flex; align-items: baseline; gap: 10px; font-variant-numeric: tabular-nums; }
-  .balance .amount { color: var(--gold); font-size: 26px; font-weight: 600; }
-  .ucard.collapsed .ucard-head { margin-bottom: 8px; }
-  .ucard.collapsed .chev { transform: rotate(-90deg); }
-  .ucard-compact { display: flex; flex-wrap: wrap; gap: 8px 16px; }
-  .ucard-compact .mini { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 5px; font-size: 12px; color: var(--text); }
+  .ucols { padding-top: 9px; padding-bottom: 7px; color: var(--muted); font-size: 10px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; border-bottom: 1px solid var(--card-border); }
+  .uscale { position: relative; height: 1.2em; }
+  .uscale span { position: absolute; top: 0; }
+  .uscale .ulimit-label { left: var(--limit-at); transform: translateX(-50%); color: var(--text); }
+  .ucols .unum, .uused, .ureset { text-align: right; }
+  .ugroup + .ugroup { border-top: 1px solid var(--card-border); }
+  .ugroup-head .ucard-toggle {
+    width: 100%; min-height: 40px; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 8px 14px;
+    background: #080808; border: 0; color: var(--text); font: inherit; font-size: 12px; text-align: left; cursor: pointer;
+  }
+  .ugroup-head .ucard-label { color: var(--gold); font-weight: 600; letter-spacing: .04em; }
+  .ugroup-head .ucard-toggle:hover .ucard-label { color: var(--text); }
+  .ugroup-head .ucard-toggle:focus-visible, .ufail summary:focus-visible { outline: 2px solid var(--gold); outline-offset: -2px; }
+  .ugroup .chev, .ufail .chev { width: 12px; height: 12px; flex: none; color: var(--muted); transition: transform .15s ease-out; }
+  .ugroup.collapsed .chev, .ufail:not([open]) .chev { transform: rotate(-90deg); }
+  .ugroup-sum { min-width: 0; color: var(--muted); }
+  .ugroup-sum > * { white-space: nowrap; }
+  .ugroup-sum b { color: var(--text); font-weight: 600; }
+  .ugroup-sum.s-out b, .ugroup-sum.s-risk .uphrase, .ugroup-sum.s-out .uphrase { color: var(--ember); }
+  .unote { margin-left: auto; color: var(--muted); font-size: 11px; white-space: nowrap; }
+  .unote.cached { color: var(--ember); }
+  .urows { padding: 4px 0; }
+  .urow { min-height: 32px; font-size: 12px; }
+  .uwin { color: var(--text); overflow-wrap: anywhere; }
+  .uused { color: var(--text); font-weight: 600; white-space: nowrap; }
+  .ufc { color: var(--muted); }
+  .ufc b { color: var(--text); font-weight: 600; }
+  .ufc .uphrase, .ureset, .unote, .ufresh, .umore, .ubals li > span { white-space: nowrap; }
+  .ureset { color: var(--muted); }
+  .s-tight .ufc b, .s-tight .uused { color: var(--gold); }
+  .s-risk .ufc, .s-risk .ufc b, .s-out .ufc, .s-out .ufc b, .s-out .uused { color: var(--ember); }
+  .s-unknown .uwin, .s-unknown .uused { color: var(--muted); font-weight: 400; }
+  .ubar { position: relative; height: 8px; background: var(--track); border-radius: 1px; }
+  .ubar > span { position: absolute; top: 0; bottom: 0; }
+  .ubar-used { left: 0; background: var(--gold-dim); border-radius: 1px 0 0 1px; }
+  .s-tight .ubar-used, .s-risk .ubar-used { background: var(--gold); }
+  .s-out .ubar-used { background: var(--ember); }
+  .ubar-fc { background: rgba(255, 215, 0, .14); outline: 1px solid rgba(184, 155, 35, .7); outline-offset: -1px; }
+  .ubar-over { background: rgba(255, 122, 77, .32); outline: 1px solid var(--ember-dim); outline-offset: -1px; }
+  .ubar-over.beyond { -webkit-mask-image: linear-gradient(90deg, #000 60%, transparent); mask-image: linear-gradient(90deg, #000 60%, transparent); }
+  .ubar > .ubar-limit { left: var(--limit-at); top: -12px; bottom: -12px; width: 1px; background: rgba(138, 133, 120, .55); }
+  .ulbl, .usr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .ubals { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 24px; padding: 11px 14px; border-top: 1px solid var(--card-border); }
+  .ubals h3, .ufail-title { color: var(--muted); font-size: 10px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; }
+  .ubals ul { display: flex; flex-wrap: wrap; gap: 6px 28px; }
+  .ubals li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; font-size: 12px; }
+  .ubals .uamount { color: var(--gold); font-size: 14px; font-weight: 600; }
+  .ubals .unote { margin-left: 0; }
+  .ufail { border-top: 1px solid var(--card-border); padding: 0 14px; font-size: 12px; color: var(--muted); }
+  .ufail summary { min-height: 36px; width: fit-content; max-width: 100%; display: grid; grid-template-columns: 12px minmax(0, auto); align-items: center; gap: 2px 10px; padding: 8px 0; cursor: pointer; list-style: none; }
+  .ufail summary > span { grid-column: 2; min-width: 0; overflow-wrap: anywhere; }
+  .ufail summary::-webkit-details-marker { display: none; }
+  .ufail summary b { color: var(--ember); font-weight: 600; }
+  .ufail ul { padding: 0 0 10px 22px; }
+  .ufail li { padding: 3px 0; overflow-wrap: anywhere; }
+  .ufail li b { color: var(--text); font-weight: 600; }
+  .ufail code { display: inline-block; max-width: 100%; color: var(--muted); font: inherit; overflow-wrap: anywhere; }
+  .udash { color: var(--muted); font-weight: 400; }
+  .urow.ulead .uwin { font-weight: 600; }
+  .urow.ulead .uused, .urow.ulead .ufc b { font-size: 14px; }
+  .urow.ulead .ubar { height: 10px; }
+  .uempty { padding: 12px 14px; color: var(--muted); font-size: 12px; }
+  @media (max-width: 820px) {
+    .ucols { display: none; }
+    .urow {
+      grid-template-columns: minmax(0, 1fr) auto; gap: 7px 12px; padding: 9px 14px 10px 36px;
+      grid-template-areas: "win reset" "bar bar" "used fc";
+    }
+    .urow + .urow { border-top: 1px solid #1a1a17; }
+    .uwin { grid-area: win; } .ubar { grid-area: bar; } .uused { grid-area: used; text-align: left; }
+    .ufc { grid-area: fc; text-align: right; } .ureset { grid-area: reset; }
+    .ufc .uphrase { display: block; }
+    .udash, .s-unknown .ufc { display: none; }
+    .ulbl { position: static; width: auto; height: auto; overflow: visible; clip-path: none; font-weight: 400; }
+    .ubar > .ubar-limit { top: -4px; bottom: -4px; }
+  }
+  @media (max-width: 640px) {
+    .usage-summary { flex-basis: 100%; margin-left: 20px; }
+    .umore { display: block; }
+    .usep { display: none; }
+    .ufresh { margin-left: 0; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    #usage-toggle .chev, .ugroup .chev, .ufail .chev { transition: none; }
+  }
 
   .session-table-wrap { border: 1px solid var(--card-border); border-radius: 4px; background: var(--card); }
   .session-table {
@@ -247,12 +318,12 @@
   <p id="herdr-note" class="herdr-note">The dashboard reads agent states. Use a machine terminal to interact.</p>
   </div>
 </section>
-<section class="usage-section">
-  <button id="usage-toggle" aria-controls="usage-body" class="usage-toggle" aria-expanded="true">
-    <span class="chev">▾</span> Usage &amp; Balances
-    <span class="hint">plan speedometers · balances · agent polls every 60s</span>
-  </button>
-  <div id="usage-body" class="usage-body"><p class="empty">loading usage…</p></div>
+<section class="usage-section" aria-labelledby="usage-title">
+  <h2 id="usage-title"><button id="usage-toggle" type="button" aria-controls="usage-body" class="usage-toggle" aria-expanded="true">
+    <svg class="chev" viewBox="0 0 12 12" aria-hidden="true" focusable="false"><path d="m2 4 4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.5"/></svg> Usage &amp; Balances
+    <span class="usage-summary" id="usage-summary">loading usage…</span>
+  </button></h2>
+  <div id="usage-body" class="usage-body"><p class="uempty">loading usage…</p></div>
 </section>
 <section class="pulse-section">
   <button id="pulse-toggle" class="usage-toggle" aria-expanded="true" aria-controls="pulse-body">
@@ -301,15 +372,6 @@ function compactDur(ms) {
   return d + "d " + (h % 24) + "h";
 }
 
-// Live reset countdown: recomputed every render so cached agent data never
-// shows a stale "resets now".
-function resetCountdown(resetAt) {
-  if (!resetAt || /^0001-01-01T/.test(resetAt)) return "reset time unavailable";
-  const ms = new Date(resetAt).getTime() - Date.now();
-  if (!Number.isFinite(ms)) return "reset time unavailable";
-  if (ms <= 0) return "resetting…";
-  return "resets in " + compactDur(ms);
-}
 
 // Session span. Active sessions are still growing, so measure to now (this
 // recomputes on every 5s render); ended/idle ones measure to their last
@@ -323,93 +385,206 @@ function durationOf(s) {
   return compactDur(ms);
 }
 
-// --- usage speedometers -----------------------------------------------------
-// HTML/SVG adaptation of GPUI Kit chart styling; no native GPUI runtime.
+// --- usage runway board ------------------------------------------------------
+// Every quota window is one row on a shared 0-125% scale with the plan limit
+// at 100%. Forecasts come from the agent (`projectedEnd`, uncapped); the time
+// a window runs out assumes the same linear pace the agent used.
+const USAGE_SCALE_MAX = 125;
+const USAGE_STALE_MS = 180000;
+const USAGE_STATUS_RANK = { out: 4, risk: 3, tight: 2, ok: 1, unknown: 0 };
+const WINDOW_PERIODS = { "5h": "5-hour", w: "weekly", weekly: "weekly", monthly: "monthly" };
+const WINDOW_POOLS = { "3p": "Third-party" };
+const CHEVRON = '<svg class="chev" viewBox="0 0 12 12" aria-hidden="true" focusable="false"><path d="m2 4 4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>';
+
 function usedPercent(value) {
   return Number.isFinite(value) ? Math.max(0, Math.min(100, value)) : null;
 }
 function projectedPercent(value) {
   return Number.isFinite(value) && value >= 0 ? value : null;
 }
-function usageColor(pct) {
-  return pct == null ? "#aaa398" : pct >= 85 ? "#f08b8b" : pct >= 65 ? "#e5b567" : "#73c6a3";
+function pctText(value) {
+  return Math.round(value) + "%";
 }
-function polar(cx, cy, r, deg) {
-  const a = ((deg - 180) * Math.PI) / 180;
-  return [cx - r * Math.cos(a), cy - r * Math.sin(a)];
+function scalePos(pct) {
+  return (Math.min(USAGE_SCALE_MAX, Math.max(0, pct)) / USAGE_SCALE_MAX) * 100;
 }
-function arcPath(cx, cy, r, startDeg, endDeg) {
-  const [sx, sy] = polar(cx, cy, r, startDeg);
-  const [ex, ey] = polar(cx, cy, r, endDeg);
-  return `M ${sx.toFixed(2)} ${sy.toFixed(2)} A ${r} ${r} 0 0 1 ${ex.toFixed(2)} ${ey.toFixed(2)}`;
+// Collector labels are terse ("Gemini W", "3P 5h", "Weekly"); split them into
+// an optional pool and a readable period.
+function windowName(label) {
+  const parts = String(label ?? "").trim().split(/\s+/).filter(Boolean);
+  const period = parts.length ? WINDOW_PERIODS[parts[parts.length - 1].toLowerCase()] : null;
+  if (!period) return { pool: "", period: parts.join(" ") || "window", known: false };
+  const pool = parts.slice(0, -1).map((p) => WINDOW_POOLS[p.toLowerCase()] ?? p).join(" ");
+  return { pool, period, known: true };
 }
-function forecastText(projected) {
-  return projected == null ? "forecast unavailable" : `At reset ${Math.round(projected)}%${projected > 100 ? " · over limit" : ""}`;
+function windowLabel(label) {
+  const { pool, period } = windowName(label);
+  return pool ? `${pool} · ${period}` : period[0].toUpperCase() + period.slice(1);
 }
-function gaugeSvg(g) {
+// Recomputed on every render so cached agent data never shows a stale
+// countdown; old agents send Go's zero time for a missing reset.
+function remainingMs(resetAt) {
+  if (!resetAt || /^0001-01-01T/.test(resetAt)) return null;
+  const ms = Date.parse(resetAt) - Date.now();
+  return Number.isFinite(ms) ? Math.max(0, ms) : null;
+}
+// The forecast belongs to the moment the agent fetched it, so the run-out
+// instant is anchored there and cached readings keep counting down during an
+// outage instead of drifting with the shrinking reset horizon.
+function windowState(g, provider, fetchedAt, cardError = "") {
   const used = usedPercent(g.usedPercent);
   const projected = projectedPercent(g.projectedEnd);
-  const value = used == null ? "unavailable" : `${Math.round(used)}%`;
-  const reset = resetCountdown(g.resetAt);
-  const forecast = forecastText(projected);
-  const cx = 72, cy = 70, r = 58;
-  const measured = used > 0
-    ? `<path class="measured-arc" d="${arcPath(cx, cy, r, 180, 180 + used * 1.8)}" stroke="${usageColor(used)}" stroke-width="6" stroke-linecap="round" fill="none"/>` : "";
-  let marker = "";
-  if (projected != null) {
-    const [x, y] = polar(cx, cy, r, 180 + Math.min(100, projected) * 1.8);
-    marker = `<circle class="forecast-marker" cx="${x.toFixed(2)}" cy="${y.toFixed(2)}" r="4" fill="var(--card)" stroke="${projected > 100 ? "#f08b8b" : "#aaa398"}" stroke-width="1.5"/>`;
+  const remaining = remainingMs(g.resetAt);
+  let status = "unknown";
+  let runsOutMs = null;
+  if (used != null) {
+    if (used >= 100) status = "out";
+    else if (projected != null && projected > 100) {
+      status = "risk";
+      const resetAt = Date.parse(g.resetAt || "");
+      const fetched = Date.parse(fetchedAt || "");
+      const from = Number.isFinite(fetched) && fetched <= Date.now() ? fetched : Date.now();
+      const horizon = resetAt - from;
+      if (remaining != null && Number.isFinite(horizon) && horizon > 0 && projected > used) {
+        runsOutMs = Math.max(0, from + ((100 - used) * horizon) / (projected - used) - Date.now());
+      }
+    } else status = used >= 85 || (projected ?? 0) >= 85 ? "tight" : "ok";
   }
-  return `<div class="gauge" role="img" aria-label="${esc(g.label)}: ${value}${used == null ? "" : " used"}; ${esc(reset)}; ${esc(forecast)}">
-    <span class="glabel">${esc(g.label)}</span>
-    <div class="gauge-dial">
-      <svg viewBox="0 0 144 88" aria-hidden="true" focusable="false">
-        <path d="${arcPath(cx, cy, r, 180, 360)}" stroke="#333333" stroke-width="6" stroke-linecap="round" fill="none"/>
-        ${measured}${marker}
-      </svg>
-      <span class="gvalue ${used == null ? "unavailable" : ""}">${value}${used == null ? "" : "<small>used</small>"}</span>
-    </div>
-    <span class="greset">${esc(reset)}</span>
-    <span class="gproj ${projected > 100 ? "over" : ""}">${projected == null ? "" : '<span class="forecast-key" aria-hidden="true"></span>'}${esc(forecast)}</span>
-  </div>`;
+  return { provider, raw: g.label, label: windowLabel(g.label), used, projected, remaining, status, runsOutMs, fetchedAt, cardError };
 }
-function usageFreshness(card) {
+function compareUrgency(a, b) {
+  return USAGE_STATUS_RANK[b.status] - USAGE_STATUS_RANK[a.status]
+    || (a.status === "risk" ? (a.runsOutMs ?? Infinity) - (b.runsOutMs ?? Infinity) : 0)
+    || (b.projected ?? b.used ?? -1) - (a.projected ?? a.used ?? -1);
+}
+function statusPhrase(w) {
+  if (w.status === "out") return "limit reached";
+  if (w.status === "risk") {
+    if (w.runsOutMs == null) return "runs out before reset";
+    return w.runsOutMs < 60000 ? "likely at limit now" : "runs out in " + compactDur(w.runsOutMs);
+  }
+  if (w.status === "tight") return "near limit";
+  return "";
+}
+function resetText(w) {
+  if (w.remaining == null) return "unknown";
+  return w.remaining <= 0 ? "resetting…" : compactDur(w.remaining);
+}
+function runwayBar(w) {
+  if (w.used == null) return '<span class="ubar" aria-hidden="true"><span class="ubar-limit"></span></span>';
+  const end = Math.max(w.used, w.projected ?? w.used);
+  const seg = (cls, from, to) => to > from
+    ? `<span class="${cls}" style="left:${scalePos(from).toFixed(2)}%;width:${(scalePos(to) - scalePos(from)).toFixed(2)}%"></span>` : "";
+  return '<span class="ubar" aria-hidden="true">'
+    + seg("ubar-used", 0, w.used)
+    + seg("ubar-fc", w.used, Math.min(end, 100))
+    + seg("ubar-over" + (end > USAGE_SCALE_MAX ? " beyond" : ""), Math.max(w.used, 100), end)
+    + '<span class="ubar-limit"></span></span>';
+}
+function quotaRow(w, lead = false) {
+  const phrase = statusPhrase(w);
+  const used = w.used == null ? '<span class="udash" aria-hidden="true">—</span><span class="ulbl">no reading</span>' : pctText(w.used) + '<span class="ulbl"> used</span>';
+  const forecast = w.projected == null
+    ? `<span class="uphrase">${w.used == null ? "no reading" : ["no forecast", phrase].filter(Boolean).join(" · ")}</span>`
+    : `<b>${pctText(w.projected)}</b><span class="ulbl"> at reset</span>${phrase ? ` <span class="uphrase">${phrase}</span>` : ""}`;
+  return `<li class="urow s-${w.status}${lead ? " ulead" : ""}"><span class="uwin">${esc(w.label)}</span>${runwayBar(w)}`
+    + `<span class="uused">${used}</span><span class="ufc">${forecast}</span>`
+    + `<span class="ureset"><span class="ulbl">${w.remaining == null ? "reset time " : "resets in "}</span>${resetText(w)}</span></li>`;
+}
+// Per-card freshness only when it matters: stale data or cached values kept
+// after a failed refresh. The section header carries the normal timestamp.
+function cardNote(card) {
+  if (card.error) {
+    const age = rel(card.fetchedAt);
+    return { text: "refresh failed · cached" + (age === "—" ? "" : age === "now" ? " just now" : " " + age), cls: "cached" };
+  }
   const fetched = Date.parse(card.fetchedAt || "");
-  if (!Number.isFinite(fetched)) return "update time unavailable";
-  const age = Math.max(0, Date.now() - fetched);
-  return `${age > 180000 ? "stale · " : ""}${compactDur(age)} ago`;
+  if (!Number.isFinite(fetched)) return { text: "update time unavailable", cls: "" };
+  return Date.now() - fetched > USAGE_STALE_MS ? { text: `stale · ${rel(card.fetchedAt)}`, cls: "" } : null;
 }
-function usageCard(card, machine) {
-  const collapsible = card.kind !== "unknown";
-  const collapsed = collapsible && cardCollapsed(machine, card.key);
-  const label = `<span class="ucard-label">${esc(card.label)}</span><span class="usage-stale">${esc(usageFreshness(card))}</span>`;
-  const id = "usage-card-" + encodeURIComponent(machine + ":" + card.key);
-  const heading = collapsible
-    ? `<button type="button" class="ucard-toggle" data-machine="${esc(machine)}" data-key="${esc(card.key)}" aria-expanded="${!collapsed}" aria-controls="${esc(id)}">${label}<svg class="chev" viewBox="0 0 12 12" aria-hidden="true"><path d="m2 4 4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></button>`
-    : label;
-  const notice = card.error ? `<span class="ucard-error ucard-notice">${esc(card.error)}${card.gauges?.length || card.balanceUsd != null ? " · cached values" : ""}</span>` : "";
-  let body;
-  if (card.kind === "quota") body = card.gauges?.length
-    ? `<div class="gauges">${card.gauges.map(gaugeSvg).join("")}</div>`
-    : '<span class="ucard-error">usage unavailable</span>';
-  else if (card.kind === "balance") body = Number.isFinite(card.balanceUsd)
-    ? `<div class="balance"><span class="amount">$${card.balanceUsd.toFixed(2)}</span></div>`
-    : '<span class="ucard-error">balance unavailable</span>';
-  else body = '<span class="ucard-error">no usage source yet</span>';
-  return `<div class="ucard ${collapsed ? "collapsed" : ""}"><div class="ucard-head">${heading}</div>${notice}${collapsed ? compactBody(card) : ""}<div id="${esc(id)}"${collapsed ? " hidden" : ""}>${collapsed ? "" : body}</div></div>`;
+function noteHtml(card) {
+  const note = cardNote(card);
+  return note ? `<span class="unote${note.cls ? " " + note.cls : ""}">${esc(note.text)}</span>` : "";
 }
-function compactBody(card) {
-  if (card.kind === "quota") {
-    const minis = (card.gauges || []).map((g) => {
-      const used = usedPercent(g.usedPercent);
-      const projected = projectedPercent(g.projectedEnd);
-      return `<span class="mini">${esc(g.label)} <b style="color:${usageColor(used)}">${used == null ? "unavailable" : Math.round(used) + "% used"}</b><span class="gproj ${projected > 100 ? "over" : ""}">${esc(forecastText(projected))}</span></span>`;
-    }).join("");
-    return `<div class="ucard-compact">${minis || '<span class="ucard-error">usage unavailable</span>'}</div>`;
+// Clauses wrap as whole units; each separator trails its clause so a wrapped
+// line never starts with "·".
+function collapsedSummary(w, phrase) {
+  const clauses = [`<b>${w.used == null ? "no reading" : pctText(w.used) + " used"}</b>`];
+  if (w.used != null && w.projected != null) clauses.push(`<span>${pctText(w.projected)} at reset</span>`);
+  if (phrase) clauses.push(`<span class="uphrase">${phrase}</span>`);
+  const joined = clauses.map((c, i) => i < clauses.length - 1 ? c.replace(/<\/(b|span)>$/, " ·</$1>") : c).join(" ");
+  return `<span class="ugroup-sum s-${w.status}"><span>${esc(w.label)}</span> ${joined}</span>`;
+}
+function quotaGroup(card, windows, lead = false) {
+  const collapsed = cardCollapsed("global", card.key);
+  const id = "usage-card-" + encodeURIComponent("global:" + card.key);
+  const worst = windows[0];
+  const phrase = statusPhrase(worst);
+  const summary = collapsed
+    ? collapsedSummary(worst, phrase)
+    : "";
+  return `<li class="ugroup${collapsed ? " collapsed" : ""}"><h3 class="ugroup-head">`
+    + `<button type="button" class="ucard-toggle" data-machine="global" data-key="${esc(card.key)}" aria-expanded="${!collapsed}" aria-controls="${esc(id)}">`
+    + `${CHEVRON}<span class="ucard-label">${esc(card.label)}</span>${summary}${noteHtml(card)}</button></h3>`
+    + `<ul class="urows" id="${esc(id)}"${collapsed ? " hidden" : ""}>${collapsed ? "" : windows.map((w, i) => quotaRow(w, lead && i === 0)).join("")}</ul></li>`;
+}
+// The header's freshness describes the reading behind the verdict, not the
+// newest card, so a stale or cached verdict never reads as freshly updated.
+function headerStamp(source, cards) {
+  const readings = source?.length ? source : cards;
+  const times = readings.map((r) => Date.parse(r.fetchedAt || "")).filter(Number.isFinite);
+  if (!times.length) return '<span class="ufresh">update time unavailable</span>';
+  const oldest = new Date(source?.length ? Math.min(...times) : Math.max(...times)).toISOString();
+  const failed = (source ?? []).filter((r) => r.cardError);
+  if (failed.length) {
+    // The failure label carries the failed readings' own age; a failed card with no
+    // windows has nothing cached, so its time is the failed attempt.
+    const failedTimes = failed.map((r) => Date.parse(r.fetchedAt || "")).filter(Number.isFinite);
+    const age = failedTimes.length ? " " + rel(new Date(Math.min(...failedTimes)).toISOString()) : "";
+    const cached = failed.some((r) => !r.attemptOnly);
+    return `<span class="ufresh cached">refresh failed${age ? " ·" : ""}${cached ? " cached" : ""}${age}</span>`;
   }
-  return Number.isFinite(card.balanceUsd)
-    ? `<div class="ucard-compact"><span class="mini"><b style="color:var(--gold)">$${card.balanceUsd.toFixed(2)}</b></span></div>`
-    : '<span class="ucard-error">balance unavailable</span>';
+  if (Date.now() - Date.parse(oldest) > USAGE_STALE_MS) return `<span class="ufresh stale">stale · ${rel(oldest)}</span>`;
+  return `<span class="ufresh">updated ${rel(oldest)}</span>`;
+}
+function failureText(card) {
+  if (card.kind !== "quota" && card.kind !== "balance") return "no usage source yet";
+  const what = card.kind === "balance" ? "balance" : "usage";
+  if (card.error) return `couldn't read ${what}`;
+  return card.kind === "balance" ? "no balance reported" : "no usage windows reported";
+}
+function hasUsageData(card) {
+  return (card.kind === "quota" && card.gauges?.length > 0) || (card.kind === "balance" && Number.isFinite(card.balanceUsd));
+}
+// Section verdict: the window that runs out first, so the answer stays
+// visible even with the section collapsed.
+function usageVerdict(windows) {
+  const atRisk = windows.filter((w) => w.status === "risk" || w.status === "out");
+  const worst = windows[0];
+  if (!worst) return { text: "no quota readings", status: "unknown" };
+  const { pool, period, known } = windowName(worst.raw);
+  const name = `${worst.provider} ${known ? (pool ? pool + " " : "") + period : worst.label}`;
+  if (worst.status === "risk" || worst.status === "out") {
+    const more = atRisk.length > 1 ? `${atRisk.length - 1} more at risk` : "";
+    return { text: `${name} ${statusPhrase(worst)}`, more, status: worst.status, source: [worst] };
+  }
+  if (worst.status === "tight") return { text: `${name} near limit (${pctText(worst.projected ?? worst.used)})`, status: "tight", source: [worst] };
+  if (worst.status === "unknown") return { text: "no quota readings", status: "unknown", source: windows };
+  const unread = windows.filter((w) => w.status === "unknown");
+  if (unread.length) {
+    const u = windowName(unread[0].raw);
+    const uname = `${unread[0].provider} ${u.known ? (u.pool ? u.pool + " " : "") + u.period : unread[0].label}`;
+    const more = unread.length > 1 ? `${unread.length - 1} more without a reading` : "";
+    return { text: `${uname} has no reading`, more, status: "unknown", source: [unread[0]] };
+  }
+  // Pace is only known where the agent sent a forecast; collectors skip it early in a
+  // window or without a trustworthy reset, so those windows never count as on pace.
+  const unforecast = windows.filter((w) => w.projected == null);
+  if (unforecast.length === windows.length) return { text: "no forecasts yet", status: "unknown", source: windows };
+  if (unforecast.length) {
+    return { text: "forecasts on pace", more: `${unforecast.length} without a forecast`, status: "unknown", source: windows };
+  }
+  return { text: "all plans on pace", status: "ok", source: windows };
 }
 
 let lastFleet = null;
@@ -725,31 +900,43 @@ function toggleCard(machine, key) {
   if (lastFleet) renderUsage(lastFleet);
 }
 
+let usageFailuresOpen = false;
 function bindUsageCardToggles() {
-  document.getElementById("usage-body").addEventListener("click", (e) => {
+  const body = document.getElementById("usage-body");
+  body.addEventListener("click", (e) => {
     const el = e.target.closest(".ucard-toggle");
     if (el) toggleCard(el.dataset.machine, el.dataset.key);
   });
+  // <details> keeps its own open state; carry it across the 5 s re-render.
+  body.addEventListener("toggle", (e) => {
+    if (e.target.matches?.(".ufail")) usageFailuresOpen = e.target.open;
+  }, true);
 }
 
 function renderUsage(fleet) {
   const body = document.getElementById("usage-body");
+  const summary = document.getElementById("usage-summary");
   const focused = document.activeElement;
-  const focusKey = body.contains(focused) && focused?.matches(".ucard-toggle") ? { ...focused.dataset } : null;
+  const inBody = body.contains(focused);
+  const focusKey = inBody && focused?.matches(".ucard-toggle") ? { ...focused.dataset } : null;
+  const focusFailures = inBody && focused?.matches(".ufail summary");
   const restoreFocus = () => {
-    if (!focusKey) return;
-    const control = [...body.querySelectorAll(".ucard-toggle")].find((el) => el.dataset.machine === focusKey.machine && el.dataset.key === focusKey.key);
+    let control = null;
+    if (focusFailures) control = body.querySelector(".ufail summary");
+    else if (focusKey) control = [...body.querySelectorAll(".ucard-toggle")].find((el) => el.dataset.machine === focusKey.machine && el.dataset.key === focusKey.key);
+    else return;
     (control || document.getElementById("usage-toggle")).focus({ preventScroll: true });
   };
   const machines = (fleet.machines ?? []).filter((m) => m.usage && m.usage.cards?.length);
   if (!machines.length) {
-    body.innerHTML = '<p class="empty">no usage reporters online yet</p>';
+    body.innerHTML = '<p class="uempty">no usage reporters online yet</p>';
+    summary.textContent = "waiting for agents";
     restoreFocus();
     return;
   }
   // Usage cards are account-level, not per machine: several agents report the
   // same subscriptions, so merge them by key and keep the healthiest, freshest
-  // card for each. One global set: speedometers on top, balances underneath.
+  // card for each.
   const byKey = new Map();
   for (const m of machines) {
     for (const c of m.usage.cards) {
@@ -762,21 +949,45 @@ function renderUsage(fleet) {
     }
   }
   const cards = [...byKey.values()];
-  // Masonry columns: column 1 stacks the compact cards — single-gauge
-  // speedometers with the balances tucked directly underneath; every other
-  // speedometer card gets its own column (extras round-robin over columns
-  // 2-3). All cards render content-sized, so the section stays tight.
-  const isSolo = (c) => c.kind === "quota" && c.gauges?.length === 1;
-  const col1 = [
-    ...cards.filter((c) => isSolo(c)),
-    ...cards.filter((c) => c.kind !== "quota"),
-  ];
-  const multis = cards.filter((c) => c.kind === "quota" && !isSolo(c));
-  const cols = [col1];
-  multis.forEach((c, i) => (cols[1 + (i % 2)] ??= []).push(c));
-  body.innerHTML =
-    `<div class="usage-grid">${cols.filter((col) => col.length).map((col) =>
-      `<div class="usage-col">${col.map((c) => usageCard(c, "global")).join("")}</div>`).join("")}</div>`;
+  // Providers and their windows both sort by urgency, so the window that runs
+  // out first leads the board.
+  const groups = cards
+    .filter((c) => c.kind === "quota" && c.gauges?.length)
+    .map((c) => ({ card: c, windows: c.gauges.map((g) => windowState(g, c.label, c.fetchedAt, c.error)).sort(compareUrgency) }))
+    .sort((a, b) => compareUrgency(a.windows[0], b.windows[0]));
+  const balances = cards.filter((c) => c.kind === "balance" && Number.isFinite(c.balanceUsd));
+  const missing = cards.filter((c) => !hasUsageData(c));
+  const refreshFailing = cards.filter((c) => hasUsageData(c) && c.error);
+
+  const verdict = usageVerdict(groups.flatMap((g) => g.windows).sort(compareUrgency));
+  // With no quota windows at all, the verdict is about the quota cards, never a balance's timestamp.
+  const quotaAttempts = cards.filter((c) => c.kind === "quota").map((c) => ({ fetchedAt: c.fetchedAt, cardError: c.error, attemptOnly: true }));
+  summary.innerHTML = `<span class="uverdict s-${verdict.status}">${esc(verdict.text)}`
+    + `${verdict.more ? ` <span class="umore"><span class="usep">· </span>${esc(verdict.more)}</span>` : ""}</span>`
+    + `<span class="usr">, </span>${headerStamp(verdict.source ?? quotaAttempts, cards)}`;
+
+  const columns = '<div class="ucols" aria-hidden="true"><span>Window</span>'
+    + '<span class="uscale"><span>0</span><span class="ulimit-label">100% limit</span></span>'
+    + '<span class="unum">Used</span><span>At reset</span><span class="unum">Resets in</span></div>';
+  const board = groups.length
+    ? (groups.some((g) => !cardCollapsed("global", g.card.key)) ? columns : "")
+      + `<ul class="ugroups">${groups.map((g, i) => quotaGroup(g.card, g.windows,
+        i === 0 && ["out", "risk", "tight"].includes(g.windows[0].status))).join("")}</ul>`
+    : '<p class="uempty">no quota windows reported</p>';
+  const balanceList = balances.length
+    ? `<div class="ubals"><h3>Prepaid balances</h3><ul>${balances.map((c) =>
+        `<li><span>${esc(c.label)}</span><span class="uamount">$${c.balanceUsd.toFixed(2)}</span>${noteHtml(c)}</li>`).join("")}</ul></div>`
+    : "";
+  const names = (list) => esc(list.map((c) => c.label).join(", "));
+  const failures = missing.length || refreshFailing.length
+    ? `<details class="ufail"${usageFailuresOpen ? " open" : ""}><summary>${CHEVRON}`
+      + (missing.length ? `<span><b>Not reporting:</b> ${names(missing)}</span>` : "")
+      + (refreshFailing.length ? `<span><b>Refresh failing:</b> ${names(refreshFailing)}</span>` : "")
+      + `</summary><ul>${[...missing, ...refreshFailing].map((c) =>
+        `<li><b>${esc(c.label)}</b> ${hasUsageData(c) ? "refresh failed, showing cached values" : failureText(c)}`
+        + `${c.error ? ` <code>(${esc(c.error)})</code>` : ""}</li>`).join("")}</ul></details>`
+    : "";
+  body.innerHTML = `<div class="uboard">${board}${balanceList}${failures}</div>`;
   restoreFocus();
 }
 
