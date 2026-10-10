@@ -100,6 +100,7 @@
   .usage-summary { flex: 1 1 auto; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; margin-left: 10px;
     font-size: 13px; letter-spacing: 0; text-transform: none; font-variant-numeric: tabular-nums; }
   .ufresh { margin-left: auto; color: var(--muted); font-size: 11px; font-weight: 400; }
+  .ufresh.cached, .ufresh.stale { color: var(--ember); }
   .uverdict { color: var(--text); font-weight: 600; }
   .uverdict.s-risk, .uverdict.s-out { color: var(--ember); }
   .uverdict.s-tight { color: var(--gold); }
@@ -116,7 +117,7 @@
   .ucols .unum, .uused, .ureset { text-align: right; }
   .ugroup + .ugroup { border-top: 1px solid var(--card-border); }
   .ugroup-head .ucard-toggle {
-    width: 100%; min-height: 40px; display: flex; align-items: center; gap: 10px; padding: 0 14px;
+    width: 100%; min-height: 40px; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 8px 14px;
     background: #080808; border: 0; color: var(--text); font: inherit; font-size: 12px; text-align: left; cursor: pointer;
   }
   .ugroup-head .ucard-label { color: var(--gold); font-weight: 600; letter-spacing: .04em; }
@@ -124,7 +125,8 @@
   .ugroup-head .ucard-toggle:focus-visible, .ufail summary:focus-visible { outline: 2px solid var(--gold); outline-offset: -2px; }
   .ugroup .chev, .ufail .chev { width: 12px; height: 12px; flex: none; color: var(--muted); transition: transform .15s ease-out; }
   .ugroup.collapsed .chev, .ufail:not([open]) .chev { transform: rotate(-90deg); }
-  .ugroup-sum { color: var(--muted); }
+  .ugroup-sum { min-width: 0; color: var(--muted); }
+  .ugroup-sum > * { white-space: nowrap; }
   .ugroup-sum b { color: var(--text); font-weight: 600; }
   .ugroup-sum.s-out b, .ugroup-sum.s-risk .uphrase, .ugroup-sum.s-out .uphrase { color: var(--ember); }
   .unote { margin-left: auto; color: var(--muted); font-size: 11px; white-space: nowrap; }
@@ -164,7 +166,7 @@
   .ufail ul { padding: 0 0 10px 22px; }
   .ufail li { padding: 3px 0; overflow-wrap: anywhere; }
   .ufail li b { color: var(--text); font-weight: 600; }
-  .ufail code { color: var(--muted); font: inherit; white-space: nowrap; }
+  .ufail code { display: inline-block; max-width: 100%; color: var(--muted); font: inherit; overflow-wrap: anywhere; }
   .udash { color: var(--muted); font-weight: 400; }
   .urow.ulead .uwin { font-weight: 600; }
   .urow.ulead .uused, .urow.ulead .ufc b { font-size: 14px; }
@@ -429,7 +431,7 @@ function remainingMs(resetAt) {
 // The forecast belongs to the moment the agent fetched it, so the run-out
 // instant is anchored there and cached readings keep counting down during an
 // outage instead of drifting with the shrinking reset horizon.
-function windowState(g, provider, fetchedAt) {
+function windowState(g, provider, fetchedAt, cardError = "") {
   const used = usedPercent(g.usedPercent);
   const projected = projectedPercent(g.projectedEnd);
   const remaining = remainingMs(g.resetAt);
@@ -448,7 +450,7 @@ function windowState(g, provider, fetchedAt) {
       }
     } else status = used >= 85 || (projected ?? 0) >= 85 ? "tight" : "ok";
   }
-  return { provider, raw: g.label, label: windowLabel(g.label), used, projected, remaining, status, runsOutMs };
+  return { provider, raw: g.label, label: windowLabel(g.label), used, projected, remaining, status, runsOutMs, fetchedAt, cardError };
 }
 function compareUrgency(a, b) {
   return USAGE_STATUS_RANK[b.status] - USAGE_STATUS_RANK[a.status]
@@ -504,18 +506,38 @@ function noteHtml(card) {
   const note = cardNote(card);
   return note ? `<span class="unote${note.cls ? " " + note.cls : ""}">${esc(note.text)}</span>` : "";
 }
+// Clauses wrap as whole units; each separator trails its clause so a wrapped
+// line never starts with "·".
+function collapsedSummary(w, phrase) {
+  const clauses = [`<b>${w.used == null ? "no reading" : pctText(w.used) + " used"}</b>`];
+  if (w.used != null && w.projected != null) clauses.push(`<span>${pctText(w.projected)} at reset</span>`);
+  if (phrase) clauses.push(`<span class="uphrase">${phrase}</span>`);
+  const joined = clauses.map((c, i) => i < clauses.length - 1 ? c.replace(/<\/(b|span)>$/, " ·</$1>") : c).join(" ");
+  return `<span class="ugroup-sum s-${w.status}"><span>${esc(w.label)}</span> ${joined}</span>`;
+}
 function quotaGroup(card, windows, lead = false) {
   const collapsed = cardCollapsed("global", card.key);
   const id = "usage-card-" + encodeURIComponent("global:" + card.key);
   const worst = windows[0];
   const phrase = statusPhrase(worst);
   const summary = collapsed
-    ? `<span class="ugroup-sum s-${worst.status}">${esc(worst.label)} <b>${worst.used == null ? "no reading" : pctText(worst.used) + " used"}</b>${phrase ? ` · <span class="uphrase">${phrase}</span>` : ""}</span>`
+    ? collapsedSummary(worst, phrase)
     : "";
   return `<li class="ugroup${collapsed ? " collapsed" : ""}"><h3 class="ugroup-head">`
     + `<button type="button" class="ucard-toggle" data-machine="global" data-key="${esc(card.key)}" aria-expanded="${!collapsed}" aria-controls="${esc(id)}">`
     + `${CHEVRON}<span class="ucard-label">${esc(card.label)}</span>${summary}${noteHtml(card)}</button></h3>`
     + `<ul class="urows" id="${esc(id)}"${collapsed ? " hidden" : ""}>${collapsed ? "" : windows.map((w, i) => quotaRow(w, lead && i === 0)).join("")}</ul></li>`;
+}
+// The header's freshness describes the reading behind the verdict, not the
+// newest card, so a stale or cached verdict never reads as freshly updated.
+function headerStamp(source, cards) {
+  const readings = source?.length ? source : cards;
+  const times = readings.map((r) => Date.parse(r.fetchedAt || "")).filter(Number.isFinite);
+  if (!times.length) return '<span class="ufresh">update time unavailable</span>';
+  const oldest = new Date(source?.length ? Math.min(...times) : Math.max(...times)).toISOString();
+  if (source?.some((r) => r.cardError)) return `<span class="ufresh cached">refresh failed · cached ${rel(oldest)}</span>`;
+  if (Date.now() - Date.parse(oldest) > USAGE_STALE_MS) return `<span class="ufresh stale">stale · ${rel(oldest)}</span>`;
+  return `<span class="ufresh">updated ${rel(oldest)}</span>`;
 }
 function failureText(card) {
   if (card.kind !== "quota" && card.kind !== "balance") return "no usage source yet";
@@ -536,18 +558,18 @@ function usageVerdict(windows) {
   const name = `${worst.provider} ${known ? (pool ? pool + " " : "") + period : worst.label}`;
   if (worst.status === "risk" || worst.status === "out") {
     const more = atRisk.length > 1 ? `${atRisk.length - 1} more at risk` : "";
-    return { text: `${name} ${statusPhrase(worst)}`, more, status: worst.status };
+    return { text: `${name} ${statusPhrase(worst)}`, more, status: worst.status, source: [worst] };
   }
-  if (worst.status === "tight") return { text: `${name} near limit (${pctText(worst.projected ?? worst.used)})`, status: "tight" };
+  if (worst.status === "tight") return { text: `${name} near limit (${pctText(worst.projected ?? worst.used)})`, status: "tight", source: [worst] };
   if (worst.status === "unknown") return { text: "no quota readings", status: "unknown" };
   const unread = windows.filter((w) => w.status === "unknown");
   if (unread.length) {
     const u = windowName(unread[0].raw);
     const uname = `${unread[0].provider} ${u.known ? (u.pool ? u.pool + " " : "") + u.period : unread[0].label}`;
     const more = unread.length > 1 ? `${unread.length - 1} more without a reading` : "";
-    return { text: `${uname} has no reading`, more, status: "unknown" };
+    return { text: `${uname} has no reading`, more, status: "unknown", source: [unread[0]] };
   }
-  return { text: "all plans on pace", status: "ok" };
+  return { text: "all plans on pace", status: "ok", source: windows };
 }
 
 let lastFleet = null;
@@ -916,17 +938,16 @@ function renderUsage(fleet) {
   // out first leads the board.
   const groups = cards
     .filter((c) => c.kind === "quota" && c.gauges?.length)
-    .map((c) => ({ card: c, windows: c.gauges.map((g) => windowState(g, c.label, c.fetchedAt)).sort(compareUrgency) }))
+    .map((c) => ({ card: c, windows: c.gauges.map((g) => windowState(g, c.label, c.fetchedAt, c.error)).sort(compareUrgency) }))
     .sort((a, b) => compareUrgency(a.windows[0], b.windows[0]));
   const balances = cards.filter((c) => c.kind === "balance" && Number.isFinite(c.balanceUsd));
   const missing = cards.filter((c) => !hasUsageData(c));
   const refreshFailing = cards.filter((c) => hasUsageData(c) && c.error);
 
   const verdict = usageVerdict(groups.flatMap((g) => g.windows).sort(compareUrgency));
-  const newest = Math.max(0, ...cards.map((c) => Date.parse(c.fetchedAt || "") || 0));
   summary.innerHTML = `<span class="uverdict s-${verdict.status}">${esc(verdict.text)}`
     + `${verdict.more ? ` <span class="umore"><span class="usep">· </span>${esc(verdict.more)}</span>` : ""}</span>`
-    + `<span class="usr">, </span><span class="ufresh">${newest > 0 ? "updated " + rel(new Date(newest).toISOString()) : "update time unavailable"}</span>`;
+    + `<span class="usr">, </span>${headerStamp(verdict.source, cards)}`;
 
   const columns = '<div class="ucols" aria-hidden="true"><span>Window</span>'
     + '<span class="uscale"><span>0</span><span class="ulimit-label">100% limit</span></span>'

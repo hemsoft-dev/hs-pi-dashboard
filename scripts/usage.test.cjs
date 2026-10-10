@@ -163,7 +163,7 @@ test('account deduplication prefers healthy then fresh data and keeps collapse a
   r.lastFleet = fleet;
   r.renderUsage(fleet);
   assert.match(body.innerHTML, /aria-expanded="false" aria-controls="usage-card-global%3Acodex"/);
-  assert.match(body.innerHTML, /ugroup-sum s-out">Weekly <b>100% used<\/b> · <span class="uphrase">limit reached/);
+  assert.match(body.innerHTML, /ugroup-sum s-out"><span>Weekly<\/span> <b>100% used ·<\/b> <span class="uphrase">limit reached<\/span><\/span>/);
   assert.doesNotMatch(body.innerHTML, /class="ucols"/);
   assert.match(body.innerHTML, /id="usage-card-global%3Acodex" hidden><\/ul>/);
   r.toggleCard('global', 'codex');
@@ -200,4 +200,24 @@ test('a window without a reading is never reported as on pace', () => {
   assert.doesNotMatch(summary.innerHTML, /on pace/);
   r.renderUsage({ machines: [{ usage: { cards: [card({ gauges: [gauge(50, 125), gauge(null)] })] } }] });
   assert.match(summary.innerHTML, /s-risk">Codex weekly runs out in/);
+});
+
+test('the header stamp describes the reading behind the verdict', () => {
+  const { r, summary } = renderer();
+  const old = new Date(Date.now() - 20 * 60000).toISOString();
+  const fleet = (codex) => ({ machines: [{ usage: { cards: [codex, card({ key: 'moonshot', label: 'Moonshot AI', kind: 'balance', gauges: undefined, balanceUsd: 5 })] } }] });
+  r.renderUsage(fleet(card({ gauges: [gauge(50, 125)], fetchedAt: old })));
+  assert.match(summary.innerHTML, /<span class="ufresh stale">stale · 20m ago<\/span>/);
+  assert.doesNotMatch(summary.innerHTML, /updated now/);
+  r.renderUsage(fleet(card({ gauges: [gauge(50, 125)], fetchedAt: old, error: 'timeout' })));
+  assert.match(summary.innerHTML, /<span class="ufresh cached">refresh failed · cached 20m ago<\/span>/);
+  r.renderUsage(fleet(card({ gauges: [gauge(20, 40)] })));
+  assert.match(summary.innerHTML, /all plans on pace<\/span><span class="usr">, <\/span><span class="ufresh">updated now<\/span>/);
+});
+
+test('collapsed summaries show the forecast that drives their status', () => {
+  const { r, body, storage } = renderer();
+  storage.set('hs-pi-dashboard:card-collapsed:global:codex', '1');
+  r.renderUsage({ machines: [{ usage: { cards: [card({ gauges: [gauge(20, 90)] })] } }] });
+  assert.match(body.innerHTML, /ugroup-sum s-tight"><span>Weekly<\/span> <b>20% used ·<\/b> <span>90% at reset ·<\/span> <span class="uphrase">near limit<\/span><\/span>/);
 });
