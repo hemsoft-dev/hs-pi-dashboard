@@ -234,3 +234,15 @@ test('verdicts without pace data keep their source and never claim on pace', () 
   r.renderUsage({ machines: [{ usage: { cards: [card({ gauges: [gauge(0)] })] } }] });
   assert.match(summary.innerHTML, /all plans on pace/);
 });
+
+test('an empty quota verdict is stamped from the quota cards, not a balance', () => {
+  const { r, summary } = renderer();
+  const old = new Date(Date.now() - 20 * 60000).toISOString();
+  const balance = card({ key: 'moonshot', label: 'Moonshot AI', kind: 'balance', gauges: undefined, balanceUsd: 5 });
+  r.renderUsage({ machines: [{ usage: { cards: [card({ gauges: undefined, error: 'parse failed', fetchedAt: old }), balance] } }] });
+  assert.match(summary.innerHTML, /no quota readings<\/span><span class="usr">, <\/span><span class="ufresh cached">refresh failed · 20m ago<\/span>/);
+  r.renderUsage({ machines: [{ usage: { cards: [card({ gauges: [], fetchedAt: old }), balance] } }] });
+  assert.match(summary.innerHTML, /<span class="ufresh stale">stale · 20m ago<\/span>/);
+  r.renderUsage({ machines: [{ usage: { cards: [balance] } }] });
+  assert.match(summary.innerHTML, /no quota readings<\/span><span class="usr">, <\/span><span class="ufresh">updated now<\/span>/);
+});

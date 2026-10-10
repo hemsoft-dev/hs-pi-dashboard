@@ -535,7 +535,11 @@ function headerStamp(source, cards) {
   const times = readings.map((r) => Date.parse(r.fetchedAt || "")).filter(Number.isFinite);
   if (!times.length) return '<span class="ufresh">update time unavailable</span>';
   const oldest = new Date(source?.length ? Math.min(...times) : Math.max(...times)).toISOString();
-  if (source?.some((r) => r.cardError)) return `<span class="ufresh cached">refresh failed · cached ${rel(oldest)}</span>`;
+  if (source?.some((r) => r.cardError)) {
+    // A failed card with no windows has nothing cached; its time is the failed attempt.
+    const cached = source.some((r) => r.cardError && !r.attemptOnly);
+    return `<span class="ufresh cached">refresh failed · ${cached ? "cached " : ""}${rel(oldest)}</span>`;
+  }
   if (Date.now() - Date.parse(oldest) > USAGE_STALE_MS) return `<span class="ufresh stale">stale · ${rel(oldest)}</span>`;
   return `<span class="ufresh">updated ${rel(oldest)}</span>`;
 }
@@ -953,9 +957,11 @@ function renderUsage(fleet) {
   const refreshFailing = cards.filter((c) => hasUsageData(c) && c.error);
 
   const verdict = usageVerdict(groups.flatMap((g) => g.windows).sort(compareUrgency));
+  // With no quota windows at all, the verdict is about the quota cards, never a balance's timestamp.
+  const quotaAttempts = cards.filter((c) => c.kind === "quota").map((c) => ({ fetchedAt: c.fetchedAt, cardError: c.error, attemptOnly: true }));
   summary.innerHTML = `<span class="uverdict s-${verdict.status}">${esc(verdict.text)}`
     + `${verdict.more ? ` <span class="umore"><span class="usep">· </span>${esc(verdict.more)}</span>` : ""}</span>`
-    + `<span class="usr">, </span>${headerStamp(verdict.source, cards)}`;
+    + `<span class="usr">, </span>${headerStamp(verdict.source ?? quotaAttempts, cards)}`;
 
   const columns = '<div class="ucols" aria-hidden="true"><span>Window</span>'
     + '<span class="uscale"><span>0</span><span class="ulimit-label">100% limit</span></span>'
