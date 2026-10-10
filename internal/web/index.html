@@ -135,7 +135,7 @@
   .uused { color: var(--text); font-weight: 600; white-space: nowrap; }
   .ufc { color: var(--muted); }
   .ufc b { color: var(--text); font-weight: 600; }
-  .ufc .uphrase, .ureset, .unote, .ufresh, .umore, .ubals li > span, .ufail summary span { white-space: nowrap; }
+  .ufc .uphrase, .ureset, .unote, .ufresh, .umore, .ubals li > span { white-space: nowrap; }
   .ureset { color: var(--muted); }
   .s-tight .ufc b, .s-tight .uused { color: var(--gold); }
   .s-risk .ufc, .s-risk .ufc b, .s-out .ufc, .s-out .ufc b, .s-out .uused { color: var(--ember); }
@@ -157,8 +157,8 @@
   .ubals .uamount { color: var(--gold); font-size: 14px; font-weight: 600; }
   .ubals .unote { margin-left: 0; }
   .ufail { border-top: 1px solid var(--card-border); padding: 0 14px; font-size: 12px; color: var(--muted); }
-  .ufail summary { min-height: 36px; width: fit-content; display: grid; grid-template-columns: 12px auto; align-items: center; gap: 2px 10px; padding: 8px 0; cursor: pointer; list-style: none; }
-  .ufail summary > span { grid-column: 2; }
+  .ufail summary { min-height: 36px; width: fit-content; max-width: 100%; display: grid; grid-template-columns: 12px minmax(0, auto); align-items: center; gap: 2px 10px; padding: 8px 0; cursor: pointer; list-style: none; }
+  .ufail summary > span { grid-column: 2; min-width: 0; overflow-wrap: anywhere; }
   .ufail summary::-webkit-details-marker { display: none; }
   .ufail summary b { color: var(--ember); font-weight: 600; }
   .ufail ul { padding: 0 0 10px 22px; }
@@ -426,7 +426,10 @@ function remainingMs(resetAt) {
   const ms = Date.parse(resetAt) - Date.now();
   return Number.isFinite(ms) ? Math.max(0, ms) : null;
 }
-function windowState(g, provider) {
+// The forecast belongs to the moment the agent fetched it, so the run-out
+// instant is anchored there and cached readings keep counting down during an
+// outage instead of drifting with the shrinking reset horizon.
+function windowState(g, provider, fetchedAt) {
   const used = usedPercent(g.usedPercent);
   const projected = projectedPercent(g.projectedEnd);
   const remaining = remainingMs(g.resetAt);
@@ -436,7 +439,13 @@ function windowState(g, provider) {
     if (used >= 100) status = "out";
     else if (projected != null && projected > 100) {
       status = "risk";
-      if (remaining != null && projected > used) runsOutMs = ((100 - used) * remaining) / (projected - used);
+      const resetAt = Date.parse(g.resetAt || "");
+      const fetched = Date.parse(fetchedAt || "");
+      const from = Number.isFinite(fetched) && fetched <= Date.now() ? fetched : Date.now();
+      const horizon = resetAt - from;
+      if (remaining != null && Number.isFinite(horizon) && horizon > 0 && projected > used) {
+        runsOutMs = Math.max(0, from + ((100 - used) * horizon) / (projected - used) - Date.now());
+      }
     } else status = used >= 85 || (projected ?? 0) >= 85 ? "tight" : "ok";
   }
   return { provider, raw: g.label, label: windowLabel(g.label), used, projected, remaining, status, runsOutMs };
@@ -448,7 +457,10 @@ function compareUrgency(a, b) {
 }
 function statusPhrase(w) {
   if (w.status === "out") return "limit reached";
-  if (w.status === "risk") return w.runsOutMs == null ? "runs out before reset" : "runs out in " + compactDur(w.runsOutMs);
+  if (w.status === "risk") {
+    if (w.runsOutMs == null) return "runs out before reset";
+    return w.runsOutMs < 60000 ? "likely at limit now" : "runs out in " + compactDur(w.runsOutMs);
+  }
   if (w.status === "tight") return "near limit";
   return "";
 }
@@ -528,6 +540,13 @@ function usageVerdict(windows) {
   }
   if (worst.status === "tight") return { text: `${name} near limit (${pctText(worst.projected ?? worst.used)})`, status: "tight" };
   if (worst.status === "unknown") return { text: "no quota readings", status: "unknown" };
+  const unread = windows.filter((w) => w.status === "unknown");
+  if (unread.length) {
+    const u = windowName(unread[0].raw);
+    const uname = `${unread[0].provider} ${u.known ? (u.pool ? u.pool + " " : "") + u.period : unread[0].label}`;
+    const more = unread.length > 1 ? `${unread.length - 1} more without a reading` : "";
+    return { text: `${uname} has no reading`, more, status: "unknown" };
+  }
   return { text: "all plans on pace", status: "ok" };
 }
 
@@ -897,7 +916,7 @@ function renderUsage(fleet) {
   // out first leads the board.
   const groups = cards
     .filter((c) => c.kind === "quota" && c.gauges?.length)
-    .map((c) => ({ card: c, windows: c.gauges.map((g) => windowState(g, c.label)).sort(compareUrgency) }))
+    .map((c) => ({ card: c, windows: c.gauges.map((g) => windowState(g, c.label, c.fetchedAt)).sort(compareUrgency) }))
     .sort((a, b) => compareUrgency(a.windows[0], b.windows[0]));
   const balances = cards.filter((c) => c.kind === "balance" && Number.isFinite(c.balanceUsd));
   const missing = cards.filter((c) => !hasUsageData(c));

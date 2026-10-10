@@ -179,3 +179,25 @@ test('no reporters keeps an explicit empty state', () => {
   assert.match(body.innerHTML, /no usage reporters online yet/);
   assert.equal(summary.textContent, 'waiting for agents');
 });
+
+test('cached forecasts count down from their fetch time instead of drifting', () => {
+  const { r } = renderer();
+  const fetched = new Date(Date.now() - H).toISOString();
+  // Fetched an hour ago with 10h left: 50% -> 125% runs out 6h40m after fetch, so 5h40m from now.
+  const cached = r.windowState({ label: 'Weekly', usedPercent: 50, projectedEnd: 125, resetAt: new Date(Date.now() + 9 * H).toISOString() }, 'Codex', fetched);
+  assert.equal(Math.round(cached.runsOutMs / 60000), 340);
+  const late = r.windowState({ label: 'Weekly', usedPercent: 50, projectedEnd: 125, resetAt: new Date(Date.now() + H).toISOString() }, 'Codex', new Date(Date.now() - 9 * H).toISOString());
+  assert.equal(late.runsOutMs, 0);
+  assert.equal(r.statusPhrase(late), 'likely at limit now');
+  const future = r.windowState(gauge(50, 125), 'Codex', new Date(Date.now() + 5 * H).toISOString());
+  assert.equal(Math.round(future.runsOutMs / 60000), 400);
+});
+
+test('a window without a reading is never reported as on pace', () => {
+  const { r, summary } = renderer();
+  r.renderUsage({ machines: [{ usage: { cards: [card({ gauges: [gauge(20, 40), gauge(null, null, { label: '5h' })] }), card({ key: 'x', label: 'Other', gauges: [gauge(null)] })] } }] });
+  assert.match(summary.innerHTML, /uverdict s-unknown">Codex 5-hour has no reading <span class="umore"><span class="usep">· <\/span>1 more without a reading<\/span>/);
+  assert.doesNotMatch(summary.innerHTML, /on pace/);
+  r.renderUsage({ machines: [{ usage: { cards: [card({ gauges: [gauge(50, 125), gauge(null)] })] } }] });
+  assert.match(summary.innerHTML, /s-risk">Codex weekly runs out in/);
+});

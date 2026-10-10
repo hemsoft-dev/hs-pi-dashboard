@@ -26,6 +26,8 @@ colors:
   pulse-label: "#7ee8a6"
   pulse-screen: "#000603"
   pulse-border: "#123c24"
+  pulse-beat-flash: "#b9ffd1"
+  idle-dot: "#333"
   chip-working-bg: "#29230c"
   chip-working-text: "#ffe57b"
   chip-blocked-bg: "#3a1914"
