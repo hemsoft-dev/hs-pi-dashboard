@@ -229,9 +229,11 @@ test('verdicts without pace data keep their source and never claim on pace', () 
   r.renderUsage({ machines: [{ usage: { cards: [card({ gauges: [gauge(null)], fetchedAt: old, error: 'timeout' }), balance] } }] });
   assert.match(summary.innerHTML, /no quota readings<\/span><span class="usr">, <\/span><span class="ufresh cached">refresh failed · cached 20m ago/);
   r.renderUsage({ machines: [{ usage: { cards: [card({ gauges: [{ label: 'Weekly', usedPercent: 10 }] }), balance] } }] });
-  assert.match(summary.innerHTML, /uverdict s-unknown">Codex weekly has no reset time/);
+  assert.match(summary.innerHTML, /uverdict s-unknown">no forecasts yet<\/span>/);
   assert.doesNotMatch(summary.innerHTML, /on pace/);
-  r.renderUsage({ machines: [{ usage: { cards: [card({ gauges: [gauge(0)] })] } }] });
+  r.renderUsage({ machines: [{ usage: { cards: [card({ gauges: [gauge(0), gauge(20, 40)] })] } }] });
+  assert.match(summary.innerHTML, /uverdict s-unknown">forecasts on pace <span class="umore"><span class="usep">· <\/span>1 without a forecast/);
+  r.renderUsage({ machines: [{ usage: { cards: [card({ gauges: [gauge(20, 40)] })] } }] });
   assert.match(summary.innerHTML, /all plans on pace/);
 });
 
@@ -245,4 +247,15 @@ test('an empty quota verdict is stamped from the quota cards, not a balance', ()
   assert.match(summary.innerHTML, /<span class="ufresh stale">stale · 20m ago<\/span>/);
   r.renderUsage({ machines: [{ usage: { cards: [balance] } }] });
   assert.match(summary.innerHTML, /no quota readings<\/span><span class="usr">, <\/span><span class="ufresh">updated now<\/span>/);
+});
+
+test('a refresh failure is stamped with the failed reading, not the oldest healthy one', () => {
+  const { r, summary } = renderer();
+  const hourOld = new Date(Date.now() - 60 * 60000).toISOString();
+  const minuteOld = new Date(Date.now() - 60000).toISOString();
+  r.renderUsage({ machines: [{ usage: { cards: [
+    card({ gauges: [gauge(20, 40)], fetchedAt: hourOld }),
+    card({ key: 'antigravity', label: 'Antigravity', gauges: [gauge(10, 30)], fetchedAt: minuteOld, error: 'timeout' }),
+  ] } }] });
+  assert.match(summary.innerHTML, /<span class="ufresh cached">refresh failed · cached 60s ago<\/span>/);
 });

@@ -535,10 +535,14 @@ function headerStamp(source, cards) {
   const times = readings.map((r) => Date.parse(r.fetchedAt || "")).filter(Number.isFinite);
   if (!times.length) return '<span class="ufresh">update time unavailable</span>';
   const oldest = new Date(source?.length ? Math.min(...times) : Math.max(...times)).toISOString();
-  if (source?.some((r) => r.cardError)) {
-    // A failed card with no windows has nothing cached; its time is the failed attempt.
-    const cached = source.some((r) => r.cardError && !r.attemptOnly);
-    return `<span class="ufresh cached">refresh failed · ${cached ? "cached " : ""}${rel(oldest)}</span>`;
+  const failed = (source ?? []).filter((r) => r.cardError);
+  if (failed.length) {
+    // The failure label carries the failed readings' own age; a failed card with no
+    // windows has nothing cached, so its time is the failed attempt.
+    const failedTimes = failed.map((r) => Date.parse(r.fetchedAt || "")).filter(Number.isFinite);
+    const age = failedTimes.length ? " " + rel(new Date(Math.min(...failedTimes)).toISOString()) : "";
+    const cached = failed.some((r) => !r.attemptOnly);
+    return `<span class="ufresh cached">refresh failed${age ? " ·" : ""}${cached ? " cached" : ""}${age}</span>`;
   }
   if (Date.now() - Date.parse(oldest) > USAGE_STALE_MS) return `<span class="ufresh stale">stale · ${rel(oldest)}</span>`;
   return `<span class="ufresh">updated ${rel(oldest)}</span>`;
@@ -573,13 +577,12 @@ function usageVerdict(windows) {
     const more = unread.length > 1 ? `${unread.length - 1} more without a reading` : "";
     return { text: `${uname} has no reading`, more, status: "unknown", source: [unread[0]] };
   }
-  // Without a reset time there is no pace to judge, so never call it on pace.
-  const untimed = windows.filter((w) => w.remaining == null && w.projected == null);
-  if (untimed.length) {
-    const t = windowName(untimed[0].raw);
-    const tname = `${untimed[0].provider} ${t.known ? (t.pool ? t.pool + " " : "") + t.period : untimed[0].label}`;
-    const more = untimed.length > 1 ? `${untimed.length - 1} more without a reset time` : "";
-    return { text: `${tname} has no reset time`, more, status: "unknown", source: [untimed[0]] };
+  // Pace is only known where the agent sent a forecast; collectors skip it early in a
+  // window or without a trustworthy reset, so those windows never count as on pace.
+  const unforecast = windows.filter((w) => w.projected == null);
+  if (unforecast.length === windows.length) return { text: "no forecasts yet", status: "unknown", source: windows };
+  if (unforecast.length) {
+    return { text: "forecasts on pace", more: `${unforecast.length} without a forecast`, status: "unknown", source: windows };
   }
   return { text: "all plans on pace", status: "ok", source: windows };
 }
