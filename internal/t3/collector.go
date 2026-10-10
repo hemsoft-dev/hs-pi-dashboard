@@ -133,6 +133,19 @@ func (c *Collector) Poll() sessions.Snapshot {
 				rows[i].Active = false
 				rows[i].Status = "unavailable"
 			}
+			// Keep a thread first discovered through the live API visible if
+			// that API fails before SQLite catches up.
+			seen := map[string]bool{}
+			for _, row := range rows {
+				seen[row.ID] = true
+			}
+			for _, row := range c.last.Sessions {
+				if !seen[row.ID] {
+					row.Active, row.Status = false, "unavailable"
+					rows = append(rows, row)
+					seen[row.ID] = true
+				}
+			}
 		} else {
 			states := map[string]liveThread{}
 			for _, thread := range live {
@@ -142,6 +155,9 @@ func (c *Collector) Poll() sessions.Snapshot {
 				id := strings.TrimPrefix(rows[i].ID, c.prefix())
 				if thread, ok := states[id]; ok {
 					rows[i].Status, rows[i].Active = thread.state()
+					if thread.Session != nil && (thread.Session.Status == "running" || thread.Session.Status == "starting") {
+						rows[i].TurnCompletedAt = nil
+					}
 					delete(states, id)
 				} else {
 					rows[i].Active = false

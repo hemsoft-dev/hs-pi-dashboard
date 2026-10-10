@@ -266,3 +266,69 @@ func TestBackgroundMonitoringRetainsCompletedModelTurnDuration(t *testing.T) {
 		t.Fatal("background monitoring erased the completed model turn")
 	}
 }
+
+func TestTerminalSessionsOverrideBackgroundAndPendingFlags(t *testing.T) {
+	for _, status := range []string{"stopped", "interrupted", "error"} {
+		for _, background := range []string{"working", "monitoring"} {
+			thread := liveThread{Session: &liveSession{Status: status}, BackgroundLiveness: background, HasPendingApprovals: true}
+			state, active := thread.state()
+			want := "stopped"
+			if status == "error" {
+				want = "error"
+			}
+			if state != want || active {
+				t.Fatalf("terminal %s with background %s counted as %s", status, background, state)
+			}
+		}
+	}
+}
+
+func TestResumedLiveModelTurnClearsLaggingDatabaseCompletion(t *testing.T) {
+	for _, status := range []string{"starting", "running"} {
+		t.Run(status, func(t *testing.T) {
+			db, c, now := fixture(t)
+			thread(t, db, "resumed", now.Add(-time.Hour))
+			exec(t, db, `UPDATE projection_thread_sessions SET status='ready',active_turn_id=NULL`)
+			exec(t, db, `UPDATE projection_turns SET state='completed',completed_at=?`, now.Add(-time.Minute).Format(time.RFC3339Nano))
+			f, _ := attachRuntime(t, c)
+			f.threads = []liveThread{{ID: "resumed", Session: &liveSession{Status: status}}}
+			snap := c.Poll()
+			if snap.ActiveSessions != 1 || snap.Sessions[0].TurnCompletedAt != nil {
+				t.Fatal("resumed live turn retained completion")
+			}
+		})
+	}
+}
+
+func TestRuntimeFailureRetainsUnprojectedThreadWithoutDuplicates(t *testing.T) {
+	db, c, now := fixture(t)
+	thread(t, db, "stored", now)
+	f, _ := attachRuntime(t, c)
+	f.threads = []liveThread{{ID: "stored", Session: &liveSession{Status: "running"}}, {ID: "new", Title: "New live work", Session: &liveSession{Status: "running"}}}
+	first := c.Poll()
+	if first.ActiveSessions != 2 {
+		t.Fatal("setup")
+	}
+	f.status = http.StatusUnauthorized
+	for range 2 {
+		snap := c.Poll()
+		if snap.ActiveSessions != 0 || len(snap.Sessions) != 2 {
+			t.Fatal("lost cached live-only row")
+		}
+		for _, row := range snap.Sessions {
+			if row.Status != "unavailable" {
+				t.Fatal("cached row looks live")
+			}
+		}
+	}
+	f.status = http.StatusOK
+	recovered := c.Poll()
+	if recovered.ActiveSessions != 2 || len(recovered.Sessions) != 2 {
+		t.Fatal("recovery duplicated rows")
+	}
+	for i := range first.Sessions {
+		if first.Sessions[i].ID != recovered.Sessions[i].ID {
+			t.Fatal("identity changed")
+		}
+	}
+}

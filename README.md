@@ -130,6 +130,8 @@ under `%APPDATA%\npm\node_modules\t3\node_modules\@t3code\t3-win32-x64\t3.exe`.
 The environment base directory comes from the database path: for
 `~/.t3-server/userdata/state.sqlite`, pairing uses `~/.t3-server`. Separate
 configured environments get separate credentials and stable thread identities.
+The supplied Air LaunchAgent sets an absolute `-t3-bin` path because launchd does
+not inherit an interactive shell's PATH. Adjust that path for other installations.
 
 Database and live requests share a 2.5-second polling deadline. Missing discovery,
 a stopped runtime, failed authentication, timeouts or incompatible responses leave

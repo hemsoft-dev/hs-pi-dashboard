@@ -211,10 +211,19 @@ func (t liveThread) valid() bool {
 	}
 }
 
-// Match T3's Working shelf, including background work with a ready model.
+// Count live work, including a ready model monitoring in the background,
+// while excluding terminal sessions and archived threads.
 func (t liveThread) state() (string, bool) {
 	if t.ArchivedAt != nil {
 		return "stopped", false
+	}
+	if t.Session != nil {
+		switch t.Session.Status {
+		case "error":
+			return "error", false
+		case "stopped", "interrupted":
+			return "stopped", false
+		}
 	}
 	if t.HasPendingApprovals || t.HasPendingUserInput {
 		return "waiting", true
@@ -225,15 +234,10 @@ func (t liveThread) state() (string, bool) {
 			return "connecting", true
 		case "running":
 			return "working", true
-		case "error":
-			return "error", false
 		}
 	}
 	if t.BackgroundLiveness != "" {
 		return t.BackgroundLiveness, true
-	}
-	if t.Session != nil && (t.Session.Status == "stopped" || t.Session.Status == "interrupted") {
-		return "stopped", false
 	}
 	return "idle", false
 }
