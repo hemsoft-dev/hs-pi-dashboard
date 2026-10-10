@@ -79,9 +79,16 @@ test('account deduplication prefers healthy then fresh data across refreshes and
   r.renderUsage(fleet);
   assert.match(body.innerHTML, /aria-expanded="false"/);
   assert.match(body.innerHTML, /100% used/);
+  assert.match(body.innerHTML, /id="usage-card-global%3Acodex" hidden/);
   assert.doesNotMatch(body.innerHTML, /gauge-dial/);
   r.toggleCard('global', 'codex');
   assert.equal(storage.get('hs-pi-dashboard:card-collapsed:global:codex'), '0');
   assert.match(body.innerHTML, /aria-expanded="true"/);
   assert.match(body.innerHTML, /gauge-dial/);
+});
+
+
+test('older agent zero reset timestamps are unavailable, not resetting', () => {
+  const { r } = renderer();
+  assert.equal(r.resetCountdown('0001-01-01T00:00:00Z'), 'reset time unavailable');
 });

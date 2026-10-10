@@ -304,7 +304,7 @@ function compactDur(ms) {
 // Live reset countdown: recomputed every render so cached agent data never
 // shows a stale "resets now".
 function resetCountdown(resetAt) {
-  if (!resetAt) return "reset time unavailable";
+  if (!resetAt || /^0001-01-01T/.test(resetAt)) return "reset time unavailable";
   const ms = new Date(resetAt).getTime() - Date.now();
   if (!Number.isFinite(ms)) return "reset time unavailable";
   if (ms <= 0) return "resetting…";
@@ -389,15 +389,14 @@ function usageCard(card, machine) {
     : label;
   const notice = card.error ? `<span class="ucard-error ucard-notice">${esc(card.error)}${card.gauges?.length || card.balanceUsd != null ? " · cached values" : ""}</span>` : "";
   let body;
-  if (collapsed) body = compactBody(card);
-  else if (card.kind === "quota") body = card.gauges?.length
+  if (card.kind === "quota") body = card.gauges?.length
     ? `<div class="gauges">${card.gauges.map(gaugeSvg).join("")}</div>`
     : '<span class="ucard-error">usage unavailable</span>';
   else if (card.kind === "balance") body = Number.isFinite(card.balanceUsd)
     ? `<div class="balance"><span class="amount">$${card.balanceUsd.toFixed(2)}</span></div>`
     : '<span class="ucard-error">balance unavailable</span>';
   else body = '<span class="ucard-error">no usage source yet</span>';
-  return `<div class="ucard ${collapsed ? "collapsed" : ""}"><div class="ucard-head">${heading}</div><div id="${esc(id)}">${notice}${body}</div></div>`;
+  return `<div class="ucard ${collapsed ? "collapsed" : ""}"><div class="ucard-head">${heading}</div>${notice}${collapsed ? compactBody(card) : ""}<div id="${esc(id)}"${collapsed ? " hidden" : ""}>${collapsed ? "" : body}</div></div>`;
 }
 function compactBody(card) {
   if (card.kind === "quota") {

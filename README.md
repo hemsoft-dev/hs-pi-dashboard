@@ -56,7 +56,9 @@ keeping their full value and an “over limit” label. Missing values stay
 unavailable. OpenCode Zen and Moonshot AI retain their prepaid dollar balances.
 The agent refreshes usage every 60s (`GET /usage`), and the server folds it
 into `/api/fleet`. Cards older than three minutes are labeled stale; fetch
-errors remain visible alongside cached values. Section and card collapse
+errors retain the last successful quota or balance reading with its original
+fetch timestamp, alongside the current failure. Missing provider usage is
+serialized as null; missing reset times are omitted. Section and card collapse
 preferences persist, and browser refreshes preserve keyboard focus.
 
 These charts adapt the restrained geometry, spacing and theme-driven colors
