@@ -23,6 +23,8 @@ type runtimeSource struct {
 	client       *http.Client
 	run          func(context.Context, string, ...string) ([]byte, error)
 	now          func() time.Time
+	verify       func(context.Context, int, time.Time, *url.URL) error
+	scopedCLI    *bool
 	identity     string
 	token        string
 	expires      time.Time
@@ -73,7 +75,8 @@ func newRuntime(path, binary string) *runtimeSource {
 		path: filepath.Join(filepath.Dir(path), "server-runtime.json"), binary: binary,
 		client: &http.Client{Transport: &http.Transport{Proxy: nil},
 			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }},
-		now: time.Now,
+		now:    time.Now,
+		verify: verifyRuntimeProcess,
 		run: func(ctx context.Context, binary string, args ...string) ([]byte, error) {
 			// Capture stdout only; CLI diagnostics can include pairing URLs.
 			cmd := osexec.CommandContext(ctx, binary, args...)
@@ -100,6 +103,11 @@ func (r *runtimeSource) snapshot(ctx context.Context) ([]liveThread, error) {
 		return nil, errors.New("T3 runtime must use a local loopback origin")
 	}
 	base := strings.TrimRight(origin.String(), "/")
+	// A stale record must not send a fresh grant to a replacement listener.
+	if err := r.verify(ctx, record.PID, parseTime(record.StartedAt), origin); err != nil {
+		r.token = ""
+		return nil, errors.New("T3 runtime process identity unavailable")
+	}
 	identity := string(data)
 	if identity != r.identity {
 		r.token, r.identity = "", identity
@@ -157,8 +165,22 @@ func (r *runtimeSource) snapshot(ctx context.Context) ([]liveThread, error) {
 }
 
 func (r *runtimeSource) authorize(ctx context.Context, base string) error {
-	data, err := r.run(ctx, r.binary, "auth", "pairing", "create", "--base-dir", filepath.Dir(filepath.Dir(r.path)),
-		"--ttl", "1m", "--label", "hs-pi-dashboard read-only", "--json")
+	if r.scopedCLI == nil {
+		help, err := r.run(ctx, r.binary, "auth", "pairing", "create", "--help")
+		if err != nil {
+			return errors.New("T3 local pairing capabilities unavailable")
+		}
+		supported := strings.Contains(string(help), "--scope ")
+		r.scopedCLI = &supported
+	}
+	args := []string{"auth", "pairing", "create", "--base-dir", filepath.Dir(filepath.Dir(r.path)),
+		"--ttl", "1m", "--label", "hs-pi-dashboard read-only", "--json"}
+	if *r.scopedCLI {
+		args = append(args, "--scope", "orchestration:read")
+	}
+	// Older supported CLIs have no scope flag. Their one-minute, single-use
+	// grant is sent only to the verified local process and immediately narrowed.
+	data, err := r.run(ctx, r.binary, args...)
 	var grant struct {
 		Credential string `json:"credential"`
 	}

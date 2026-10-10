@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -21,6 +22,8 @@ type runtimeFixture struct {
 	status            int
 	exchanges, grants int
 	scope             string
+	beforeShell       func()
+	scopedCLI         bool
 }
 
 func attachRuntime(t *testing.T, c *Collector) (*runtimeFixture, *httptest.Server) {
@@ -35,6 +38,10 @@ func attachRuntime(t *testing.T, c *Collector) (*runtimeFixture, *httptest.Serve
 			}
 			json.NewEncoder(w).Encode(map[string]any{"access_token": "private-session-secret", "token_type": "Bearer", "scope": f.scope, "expires_in": 3600})
 		case "/api/orchestration/shell":
+			if f.beforeShell != nil {
+				f.beforeShell()
+				f.beforeShell = nil
+			}
 			if req.Method != "GET" || req.Header.Get("Authorization") != "Bearer private-session-secret" {
 				t.Error("incorrect read-only request")
 			}
@@ -52,9 +59,19 @@ func attachRuntime(t *testing.T, c *Collector) (*runtimeFixture, *httptest.Serve
 	t.Cleanup(server.Close)
 	r := newRuntime(c.path, "t3-native")
 	r.now = c.now
+	r.verify = func(context.Context, int, time.Time, *url.URL) error { return nil }
 	r.run = func(_ context.Context, binary string, args ...string) ([]byte, error) {
+		if reflect.DeepEqual(args, []string{"auth", "pairing", "create", "--help"}) {
+			if f.scopedCLI {
+				return []byte("--scope string"), nil
+			}
+			return []byte("--ttl string"), nil
+		}
 		f.grants++
 		want := []string{"auth", "pairing", "create", "--base-dir", filepath.Dir(filepath.Dir(c.path)), "--ttl", "1m", "--label", "hs-pi-dashboard read-only", "--json"}
+		if f.scopedCLI {
+			want = append(want, "--scope", "orchestration:read")
+		}
 		if binary != "t3-native" || !reflect.DeepEqual(args, want) {
 			t.Error("incorrect local pairing command")
 		}
@@ -330,5 +347,67 @@ func TestRuntimeFailureRetainsUnprojectedThreadWithoutDuplicates(t *testing.T) {
 		if first.Sessions[i].ID != recovered.Sessions[i].ID {
 			t.Fatal("identity changed")
 		}
+	}
+}
+
+func TestFreshClaudeIdentityDeduplicatesNativeTranscript(t *testing.T) {
+	db, c, now := fixture(t)
+	f, _ := attachRuntime(t, c)
+	f.threads = []liveThread{{ID: "new-claude", Title: "New Claude work", Session: &liveSession{Status: "running", ProviderName: "claudeAgent"}}}
+	f.beforeShell = func() {
+		thread(t, db, "new-claude", now)
+		exec(t, db, `UPDATE projection_thread_sessions SET provider_name='claudeAgent',provider_session_id='shared-new',provider_thread_id='provider-new' WHERE thread_id='new-claude'`)
+	}
+	snap := c.Poll()
+	if len(snap.Sessions) != 1 || snap.Sessions[0].ProviderSessionID != "shared-new" || snap.Sessions[0].ProviderThreadID != "provider-new" {
+		t.Fatal(snap)
+	}
+	native := sessions.Snapshot{Sessions: []sessions.Summary{{ID: "claude-code:shared-new", Source: "claude-code", Provider: "claude-code", Active: true}}}
+	merged := sessions.MergeSnapshots(snap, native)
+	if len(merged.Sessions) != 1 || merged.ActiveSessions != 1 {
+		t.Fatal(merged)
+	}
+}
+
+func TestRuntimeIdentityFailureDoesNotIssueOrSendCredentials(t *testing.T) {
+	_, c, _ := fixture(t)
+	f, _ := attachRuntime(t, c)
+	c.runtime.verify = func(context.Context, int, time.Time, *url.URL) error {
+		return errors.New("stale process or replacement listener")
+	}
+	if _, err := c.runtime.snapshot(context.Background()); err == nil {
+		t.Fatal("unverified runtime accepted")
+	}
+	if f.grants != 0 || f.exchanges != 0 {
+		t.Fatal("credential sent before process verification")
+	}
+	c.runtime.token = "cached"
+	if _, err := c.runtime.snapshot(context.Background()); err == nil || c.runtime.token != "" {
+		t.Fatal("cached token survived failed identity verification")
+	}
+}
+
+func TestScopedPairingCapability(t *testing.T) {
+	_, c, _ := fixture(t)
+	f, _ := attachRuntime(t, c)
+	f.scopedCLI = true
+	f.threads = []liveThread{}
+	if _, err := c.runtime.snapshot(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if f.grants != 1 || f.exchanges != 1 {
+		t.Fatal("scoped pairing not exchanged")
+	}
+}
+
+func TestRuntimeStartRejectsReusedProcess(t *testing.T) {
+	now := time.Now()
+	for _, delay := range []time.Duration{-3 * time.Second, 3 * time.Minute, -24 * time.Hour} {
+		if sameRuntimeStart(now, now.Add(delay)) {
+			t.Fatal("accepted unrelated process creation")
+		}
+	}
+	if !sameRuntimeStart(now, now.Add(5*time.Second)) {
+		t.Fatal("rejected normal server startup")
 	}
 }

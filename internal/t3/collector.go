@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -176,9 +177,18 @@ func (c *Collector) Poll() sessions.Snapshot {
 					provider = thread.Session.ProviderName
 				}
 				effort, _ := modelEffort(thread.ModelSelection.Options)
+				// The shell API deliberately omits provider resume identifiers.
+				// Re-read them after the earlier transaction so a newly started
+				// Claude thread can still deduplicate its native transcript.
+				var sessionID, providerID string
+				identityErr := db.QueryRowContext(ctx, `SELECT COALESCE(provider_session_id,''),COALESCE(provider_thread_id,'') FROM projection_thread_sessions WHERE thread_id=?`, thread.ID).Scan(&sessionID, &providerID)
+				if identityErr != nil && !errors.Is(identityErr, sql.ErrNoRows) {
+					return c.unavailable(now, "T3 provider identities unavailable")
+				}
 				rows = append(rows, sessions.Summary{ID: c.prefix() + thread.ID, Source: "t3", Name: thread.Title,
 					Project: thread.Project, Cwd: thread.Cwd, StartedAt: parseTime(thread.CreatedAt), LastActivity: parseTime(thread.UpdatedAt),
-					Provider: provider, Model: thread.ModelSelection.Model, ThinkingLevel: effort, Status: status, Active: active})
+					Provider: provider, ProviderSessionID: sessionID, ProviderThreadID: providerID,
+					Model: thread.ModelSelection.Model, ThinkingLevel: effort, Status: status, Active: active})
 			}
 		}
 	}

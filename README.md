@@ -112,10 +112,17 @@ and Pulse use the same agent snapshot on each five-second dashboard refresh.
 Duration uses the latest turn, not the lifetime of the thread.
 
 The agent discovers each environment's loopback origin from the adjacent
-`server-runtime.json`. Under the same OS account, it runs the installed T3 CLI's
+`server-runtime.json`. It verifies the recorded process creation time and that
+the process owns the listening port before sending any credential. Under the
+same OS account, it runs the installed T3 CLI's
 `auth pairing create --base-dir <environment> --ttl 1m --json`, then exchanges
 that one-time credential at `/oauth/token`, requesting only `orchestration:read`.
-It refuses broader tokens, redirects and non-loopback origins. This supported
+When the CLI advertises `--scope`, the pairing grant itself also requests
+`orchestration:read`. Older compatible CLIs, including 0.0.45, have no scope
+flag: their grant carries standard client scopes, expires after one minute,
+is single-use, and is immediately narrowed at the verified local server.
+The resulting bearer always has exactly `orchestration:read`.
+It refuses broader bearer tokens, redirects and non-loopback origins. This supported
 auth flow creates T3-managed access records; it does not modify thread projections
 or restart T3. The session token stays in agent memory and is reused until expiry
 or runtime restart. Renewal uses a new local pairing grant; an HTTP 401/403 clears
