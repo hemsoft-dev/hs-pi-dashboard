@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <title>Agent Fleet Dashboard</title>
+  <!-- A terminal prompt watching a fleet: past sessions in dim gold, the live one in full gold. -->
+  <rect width="128" height="128" rx="28" fill="#050505"/>
+  <rect x="2" y="2" width="124" height="124" rx="26" fill="none" stroke="#262626" stroke-width="4"/>
+  <path d="M28 38 54 64 28 90" fill="none" stroke="#ffd700" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="66" y="31" width="30" height="14" rx="7" fill="#b89b23"/>
+  <rect x="66" y="57" width="40" height="14" rx="7" fill="#b89b23"/>
+  <rect x="66" y="83" width="34" height="14" rx="7" fill="#ffd700"/>
+</svg>
