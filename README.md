@@ -5,6 +5,8 @@
 A gold-on-black, fleet-wide dashboard for [pi](https://github.com/badlogic/pi-mono)
 coding-agent sessions across the Tailscale network, including Claude Code and
 [T3 Code](https://github.com/pingdotgg/t3code).
+Its project icon is `assets/icon.svg`, registered for T3 Code in `t3.json` and
+inlined as the dashboard's browser favicon.
 One Go binary, two modes:
 
 ```text
