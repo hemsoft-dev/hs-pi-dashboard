@@ -212,3 +212,26 @@ func TestOlderSidebarCompletionAndSubagentFallback(t *testing.T) {
 		t.Fatal("older child runtime fallback missing")
 	}
 }
+
+// Upstream threadShell.ts propagates a live app-owned child's raised hand
+// through the lineage, even when an intermediate parent has already settled.
+// Its parent still needs to surface that child's request in the sidebar.
+func TestDelegatedRequestMatchesUpstreamAcrossSettledAncestors(t *testing.T) {
+	for _, source := range []string{"mcp", "provider"} {
+		t.Run(source, func(t *testing.T) {
+			root := presentedThread(t, map[string]any{"id": "root", "status": "running"})
+			middle := presentedThread(t, map[string]any{"id": "middle", "status": "completed", "activityRunStatus": nil, "creationSource": source, "lineage": map[string]any{"parentThreadId": "root", "relationshipToParent": "subagent"}})
+			child := presentedThread(t, map[string]any{"id": "child", "status": "waiting", "activityRunStatus": "waiting", "creationSource": "mcp", "lineage": map[string]any{"parentThreadId": "middle", "relationshipToParent": "subagent"}, "pendingRuntimeRequest": map[string]any{"kind": "user_input"}})
+			requests := delegatedRequests([]liveThread{root, middle, child})
+			if requests["root"] != "user_input" || requests["middle"] != "user_input" {
+				t.Fatal("upstream live-child request hidden behind settled ancestor", requests)
+			}
+			// End the requesting child. Its async question must then disappear from
+			// every ancestor, independently of the intermediate parent's status.
+			child.ActivityRunStatus = ""
+			if len(delegatedRequests([]liveThread{root, middle, child})) != 0 {
+				t.Fatal("ended child still propagates")
+			}
+		})
+	}
+}

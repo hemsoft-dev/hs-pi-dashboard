@@ -142,7 +142,10 @@ T3 V2 rows show the sidebar status separately from activity: **Working**, **Goal
 **Waiting**, **Approval**, **Input**, **Limited**, **Failed**, **Woke**, or **Done**.
 A ready, acknowledged thread has no badge. Working stays green. Approval and
 input, including requests from live app-owned subagents, take precedence over
-runtime work; usage-limit failures show Limited until recovery. Done and Woke
+runtime work. As in upstream `threadShell.ts`, a live app-owned child's request
+propagates through its ancestry even when an intermediate parent has settled;
+ending the requesting child clears that propagated request. Usage-limit failures
+show Limited until recovery. Done and Woke
 use the server's visit and snooze metadata. Missing visited metadata never
 invents an unread completion, and unavailable/offline sources override cached
 labels. V1 and older dashboard agents retain their existing normalized labels.
