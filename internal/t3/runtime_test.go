@@ -19,6 +19,8 @@ import (
 
 type runtimeFixture struct {
 	threads           []liveThread
+	archived          []liveThread
+	v2                bool
 	status            int
 	exchanges, grants int
 	scope             string
@@ -47,7 +49,18 @@ func attachRuntime(t *testing.T, c *Collector) (*runtimeFixture, *httptest.Serve
 			}
 			w.WriteHeader(f.status)
 			if f.status == http.StatusOK {
-				json.NewEncoder(w).Encode(map[string]any{"threads": f.threads})
+				if f.v2 {
+					if req.Header.Get("x-t3-orchestration-protocol") != "2" {
+						t.Error("missing V2 protocol header")
+					}
+					archived := f.archived
+					if archived == nil {
+						archived = []liveThread{}
+					}
+					json.NewEncoder(w).Encode(map[string]any{"threads": f.threads, "archivedThreads": archived})
+				} else {
+					json.NewEncoder(w).Encode(map[string]any{"threads": f.threads})
+				}
 			} else {
 				w.Write([]byte("private-server-error-secret"))
 			}

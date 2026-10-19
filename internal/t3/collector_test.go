@@ -349,7 +349,7 @@ func TestDefaultDetectsV2OnUpgradeAndNeverFallsBackToFrozenV1(t *testing.T) {
 	}
 }
 
-func TestExplicitV2WithLegacyTablesIsUnsupported(t *testing.T) {
+func TestMalformedV2NeverUsesLegacyTables(t *testing.T) {
 	db, c, now := fixture(t)
 	thread(t, db, "legacy-copy", now)
 	exec(t, db, `CREATE TABLE orchestration_v2_projection_threads(thread_id TEXT)`)

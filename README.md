@@ -113,13 +113,26 @@ history cap; the table paginates them. No T3 plugin, agent tool call or open tab
 required. The collector reads metadata, turn timing and provider counters without
 reading prompt text or displaying tool payloads.
 
-This collector supports T3's V1 projections. If `statev2.sqlite` appears in the
-default environment, it reports Orchestrator V2 as unsupported rather than
-silently reading the now-independent legacy database. Explicit V2 databases are
-also detected and reported unavailable. V2 collection requires a separate schema
-adapter. To intentionally monitor a V1 instance alongside V2, configure its
-`state.sqlite` path explicitly with `-t3-db`.
+The collector supports both V1 `state.sqlite` and Orchestrator V2
+`statev2.sqlite`. When the default environment upgrades, it switches to V2 and
+keeps imported thread identities stable. V2 reads its current thread, run,
+provider-turn and tool-node projections; the frozen legacy tables are never used
+as a live fallback. All non-deleted threads are included, including delegated
+child threads, archived history and threads with no assistant output. Independent
+environments retain separate identities.
 
+V2 live snapshots use the same local authenticated shell endpoint with
+`x-t3-orchestration-protocol: 2`. Working, connecting, waiting and background
+monitoring states come from that runtime, so quiet work stays active without
+recent transcript writes. Persisted running metadata alone never counts as live.
+Unknown schema or runtime states produce an unavailable source and recover on a
+later poll. Explicitly configure `state.sqlite` to monitor a separate V1 instance;
+an upgraded runtime cannot validate its frozen V1 copy as live.
+
+V2 statistics use distinct tool nodes and the latest provider-turn counter
+snapshot, with current provider-thread context usage. Unreported totals remain
+`n/a`; zero remains zero. Only metadata and selected counter fields are read
+from V2 JSON projections, excluding prompt text and tool inputs/outputs.
 T3 rows show connecting, working, monitoring, waiting for approval/input, idle,
 stopped or error state. Pulse counts verified connecting, working, monitoring and
 waiting threads. Quiet tools and background monitoring stay active regardless of
@@ -186,7 +199,7 @@ cached, and unavailable turn timing is not inferred from transcript lifetime.
 Configure each environment with a repeated flag, or disable collection explicitly:
 
 ```bash
-./hs-pi-dashboard agent -addr <tailscale-ip>:8787 -t3-db /path/to/userdata/state.sqlite
+./hs-pi-dashboard agent -addr <tailscale-ip>:8787 -t3-db /path/to/userdata/statev2.sqlite
 ./hs-pi-dashboard agent -addr <tailscale-ip>:8787 -t3-db /first/state.sqlite -t3-db /second/state.sqlite
 ./hs-pi-dashboard agent -addr <tailscale-ip>:8787 -t3-db ~/.t3-server/userdata/state.sqlite -t3-bin /path/to/t3
 ./hs-pi-dashboard agent -addr <tailscale-ip>:8787 -t3-db off

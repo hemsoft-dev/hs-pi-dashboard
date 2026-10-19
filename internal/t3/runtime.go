@@ -20,6 +20,7 @@ import (
 // creates a one-time grant, exchanged for orchestration:read only.
 type runtimeSource struct {
 	path, binary string
+	v2           bool
 	client       *http.Client
 	run          func(context.Context, string, ...string) ([]byte, error)
 	now          func() time.Time
@@ -44,6 +45,19 @@ type liveThread struct {
 		Model    string          `json:"model"`
 		Options  json.RawMessage `json:"options"`
 	} `json:"modelSelection"`
+	LatestRunStartedAt   string  `json:"latestRunStartedAt"`
+	LatestRunCompletedAt string  `json:"latestRunCompletedAt"`
+	ActivityRunStartedAt string  `json:"activityRunStartedAt"`
+	V2                   bool    `json:"-"`
+	Status               string  `json:"status"`
+	ActivityRunStatus    string  `json:"activityRunStatus"`
+	DeletedAt            *string `json:"deletedAt"`
+	PendingRequest       *struct {
+		Kind string `json:"kind"`
+	} `json:"pendingRuntimeRequest"`
+	PendingBackground []struct {
+		Kind string `json:"kind"`
+	} `json:"pendingBackgroundTasks"`
 	ArchivedAt          *string      `json:"archivedAt"`
 	BackgroundLiveness  string       `json:"backgroundLiveness"`
 	HasPendingApprovals bool         `json:"hasPendingApprovals"`
@@ -122,6 +136,9 @@ func (r *runtimeSource) snapshot(ctx context.Context) ([]liveThread, error) {
 		return nil, errors.New("T3 runtime request unavailable")
 	}
 	req.Header.Set("Authorization", "Bearer "+r.token)
+	if r.v2 {
+		req.Header.Set("x-t3-orchestration-protocol", "2")
+	}
 	resp, err := r.client.Do(req)
 	if err != nil {
 		return nil, errors.New("T3 live runtime unavailable")
@@ -135,8 +152,9 @@ func (r *runtimeSource) snapshot(ctx context.Context) ([]liveThread, error) {
 		return nil, errors.New("T3 live runtime unavailable")
 	}
 	var shell struct {
-		Threads  *[]liveThread `json:"threads"`
-		Projects []struct {
+		Threads         *[]liveThread `json:"threads"`
+		ArchivedThreads *[]liveThread `json:"archivedThreads"`
+		Projects        []struct {
 			ID            string `json:"id"`
 			Title         string `json:"title"`
 			WorkspaceRoot string `json:"workspaceRoot"`
@@ -145,23 +163,35 @@ func (r *runtimeSource) snapshot(ctx context.Context) ([]liveThread, error) {
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 8<<20)).Decode(&shell); err != nil || shell.Threads == nil {
 		return nil, errors.New("T3 live snapshot incompatible")
 	}
+	if r.v2 {
+		if shell.ArchivedThreads == nil {
+			return nil, errors.New("T3 V2 live snapshot incompatible")
+		}
+		*shell.Threads = append(*shell.Threads, (*shell.ArchivedThreads)...)
+	}
 	seen := map[string]bool{}
-	for i, thread := range *shell.Threads {
+	threads := make([]liveThread, 0, len(*shell.Threads))
+	for _, thread := range *shell.Threads {
+		thread.V2 = r.v2
+		if thread.DeletedAt != nil {
+			continue
+		}
 		if thread.ID == "" || seen[thread.ID] || !thread.valid() {
 			return nil, errors.New("T3 live snapshot incompatible")
 		}
 		seen[thread.ID] = true
 		for _, project := range shell.Projects {
 			if project.ID == thread.ProjectID {
-				(*shell.Threads)[i].Project, (*shell.Threads)[i].Cwd = project.Title, project.WorkspaceRoot
+				thread.Project, thread.Cwd = project.Title, project.WorkspaceRoot
 				break
 			}
 		}
 		if thread.WorktreePath != "" {
-			(*shell.Threads)[i].Cwd = thread.WorktreePath
+			thread.Cwd = thread.WorktreePath
 		}
+		threads = append(threads, thread)
 	}
-	return *shell.Threads, nil
+	return threads, nil
 }
 
 func (r *runtimeSource) authorize(ctx context.Context, base string) error {
@@ -219,6 +249,16 @@ func (r *runtimeSource) authorize(ctx context.Context, base string) error {
 }
 
 func (t liveThread) valid() bool {
+	if t.V2 {
+		if !v2StatusValid(t.Status) {
+			return false
+		}
+		return t.ActivityRunStatus == "" || t.ActivityRunStatus == "preparing" || t.ActivityRunStatus == "starting" || t.ActivityRunStatus == "running" || t.ActivityRunStatus == "waiting"
+	}
+	// A V2 response must never validate a frozen explicitly selected V1 file.
+	if t.Status != "" {
+		return false
+	}
 	if t.BackgroundLiveness != "" && t.BackgroundLiveness != "working" && t.BackgroundLiveness != "monitoring" {
 		return false
 	}
@@ -236,6 +276,9 @@ func (t liveThread) valid() bool {
 // Count live work, including a ready model monitoring in the background,
 // while excluding terminal sessions and archived threads.
 func (t liveThread) state() (string, bool) {
+	if t.V2 {
+		return t.v2State()
+	}
 	if t.ArchivedAt != nil {
 		return "stopped", false
 	}
@@ -260,6 +303,61 @@ func (t liveThread) state() (string, bool) {
 	}
 	if t.BackgroundLiveness != "" {
 		return t.BackgroundLiveness, true
+	}
+	return "idle", false
+}
+
+func (t liveThread) runningTurn() bool {
+	if t.V2 {
+		state := t.ActivityRunStatus
+		if state == "" {
+			state = t.Status
+		}
+		return state == "running" || state == "starting" || state == "preparing"
+	}
+	return t.Session != nil && (t.Session.Status == "running" || t.Session.Status == "starting")
+}
+
+func v2StatusValid(status string) bool {
+	switch status {
+	case "idle", "preparing", "queued", "starting", "running", "waiting", "completed", "interrupted", "failed", "cancelled", "rolled_back":
+		return true
+	}
+	return false
+}
+
+func (t liveThread) v2State() (string, bool) {
+	if t.ArchivedAt != nil {
+		return "stopped", false
+	}
+	status := t.ActivityRunStatus
+	if status == "" {
+		status = t.Status
+	}
+	switch status {
+	case "failed":
+		return "error", false
+	case "cancelled", "interrupted", "rolled_back":
+		return "stopped", false
+	}
+	if t.PendingRequest != nil {
+		return "waiting", true
+	}
+	switch status {
+	case "preparing", "starting":
+		return "connecting", true
+	case "running":
+		return "working", true
+	case "waiting":
+		return "waiting", true
+	}
+	for _, task := range t.PendingBackground {
+		if task.Kind == "monitor" {
+			return "monitoring", true
+		}
+	}
+	if len(t.PendingBackground) > 0 {
+		return "working", true
 	}
 	return "idle", false
 }
