@@ -99,34 +99,43 @@ func (c *Collector) Poll() sessions.Snapshot {
 	if err = tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='orchestration_v2_projection_threads'").Scan(&v2); err != nil {
 		return c.unavailable(now, "T3 database schema could not be inspected")
 	}
-	if v2 > 0 || (c.defaultPath && filepath.Base(c.path) == "statev2.sqlite") {
-		return c.unavailable(now, "T3 Orchestrator V2 is not yet supported; legacy state.sqlite is not used as a live fallback")
-	}
-	// T3 versions before event sequence projection leave sequence NULL.
-	// SQLite rowid still gives an indexed append cursor for those activity rows.
+	var rows []sessions.Summary
 	var rowID int64
-	if err = tx.QueryRowContext(ctx, "SELECT COALESCE(MAX(rowid),0) FROM projection_thread_activities").Scan(&rowID); err != nil {
-		return c.unavailable(now, "T3 projections unavailable: incompatible schema or locked database")
-	}
-	old := c.activities
-	after := c.rowID
-	if c.file == nil || !os.SameFile(c.file, info) || rowID < after {
-		old = nil
-		after = 0
-	}
-	next := cloneActivities(old)
-	if err = readActivities(ctx, tx, after, next); err != nil {
-		return c.unavailable(now, "T3 activity projections unavailable")
-	}
-	rows, err := c.readThreads(ctx, tx, next, now)
-	if err != nil {
-		return c.unavailable(now, "T3 thread projections unavailable: incompatible schema or locked database")
+	next := map[string]*activity{}
+	if v2 > 0 {
+		rows, err = c.readV2Threads(ctx, tx)
+		if err != nil {
+			return c.unavailable(now, "T3 V2 projections unavailable: incompatible schema or locked database")
+		}
+	} else {
+		if filepath.Base(c.path) == "statev2.sqlite" {
+			return c.unavailable(now, "T3 V2 projections unavailable: incompatible schema")
+		}
+		// V1 versions before event sequence projection leave sequence NULL.
+		if err = tx.QueryRowContext(ctx, "SELECT COALESCE(MAX(rowid),0) FROM projection_thread_activities").Scan(&rowID); err != nil {
+			return c.unavailable(now, "T3 projections unavailable: incompatible schema or locked database")
+		}
+		old := c.activities
+		after := c.rowID
+		if c.file == nil || !os.SameFile(c.file, info) || rowID < after {
+			old = nil
+			after = 0
+		}
+		next = cloneActivities(old)
+		if err = readActivities(ctx, tx, after, next); err != nil {
+			return c.unavailable(now, "T3 activity projections unavailable")
+		}
+		rows, err = c.readThreads(ctx, tx, next, now)
+		if err != nil {
+			return c.unavailable(now, "T3 thread projections unavailable: incompatible schema or locked database")
+		}
 	}
 	if err = tx.Commit(); err != nil {
 		return c.unavailable(now, "T3 database snapshot interrupted")
 	}
 	runtimeError := ""
 	if c.runtime != nil {
+		c.runtime.v2 = v2 > 0
 		live, err := c.runtime.snapshot(ctx)
 		if err != nil {
 			runtimeError = err.Error()
@@ -156,7 +165,19 @@ func (c *Collector) Poll() sessions.Snapshot {
 				id := strings.TrimPrefix(rows[i].ID, c.prefix())
 				if thread, ok := states[id]; ok {
 					rows[i].Status, rows[i].Active = thread.state()
-					if thread.Session != nil && (thread.Session.Status == "running" || thread.Session.Status == "starting") {
+					if thread.V2 {
+						start := thread.ActivityRunStartedAt
+						if start == "" {
+							start = thread.LatestRunStartedAt
+						}
+						if start != "" {
+							rows[i].TurnStartedAt = optionalTime(start)
+						}
+						if thread.LatestRunCompletedAt != "" {
+							rows[i].TurnCompletedAt = optionalTime(thread.LatestRunCompletedAt)
+						}
+					}
+					if thread.runningTurn() {
 						rows[i].TurnCompletedAt = nil
 					}
 					delete(states, id)
@@ -180,15 +201,33 @@ func (c *Collector) Poll() sessions.Snapshot {
 				// The shell API deliberately omits provider resume identifiers.
 				// Re-read them after the earlier transaction so a newly started
 				// Claude thread can still deduplicate its native transcript.
-				var sessionID, providerID string
-				identityErr := db.QueryRowContext(ctx, `SELECT COALESCE(provider_session_id,''),COALESCE(provider_thread_id,'') FROM projection_thread_sessions WHERE thread_id=?`, thread.ID).Scan(&sessionID, &providerID)
+				var sessionID, providerID, claudeIDs string
+				var historicalClaudeIDs []string
+				var identityErr error
+				if v2 > 0 {
+					identityErr = db.QueryRowContext(ctx, v2IdentityQuery, thread.ID).Scan(&providerID, &provider, &claudeIDs)
+					sessionID = providerID
+					if identityErr == nil {
+						identityErr = json.Unmarshal([]byte(claudeIDs), &historicalClaudeIDs)
+					}
+				} else {
+					identityErr = db.QueryRowContext(ctx, `SELECT COALESCE(provider_session_id,''),COALESCE(provider_thread_id,'') FROM projection_thread_sessions WHERE thread_id=?`, thread.ID).Scan(&sessionID, &providerID)
+				}
 				if identityErr != nil && !errors.Is(identityErr, sql.ErrNoRows) {
 					return c.unavailable(now, "T3 provider identities unavailable")
 				}
+				turnStart, turnEnd := thread.ActivityRunStartedAt, thread.LatestRunCompletedAt
+				if turnStart == "" {
+					turnStart = thread.LatestRunStartedAt
+				}
+				if thread.runningTurn() {
+					turnEnd = ""
+				}
 				rows = append(rows, sessions.Summary{ID: c.prefix() + thread.ID, Source: "t3", Name: thread.Title,
 					Project: thread.Project, Cwd: thread.Cwd, StartedAt: parseTime(thread.CreatedAt), LastActivity: parseTime(thread.UpdatedAt),
-					Provider: provider, ProviderSessionID: sessionID, ProviderThreadID: providerID,
-					Model: thread.ModelSelection.Model, ThinkingLevel: effort, Status: status, Active: active})
+					Provider: provider, ProviderSessionID: sessionID, ProviderThreadID: providerID, ClaudeSessionIDs: historicalClaudeIDs,
+					Model: thread.ModelSelection.Model, ThinkingLevel: effort, Status: status, Active: active,
+					TurnStartedAt: optionalTime(turnStart), TurnCompletedAt: optionalTime(turnEnd)})
 			}
 		}
 	}
@@ -229,7 +268,12 @@ func (c *Collector) Poll() sessions.Snapshot {
 }
 
 func (c *Collector) prefix() string {
-	sum := sha256.Sum256([]byte(c.path))
+	path := c.path
+	// V2 imports the same app thread IDs from V1; keep their dashboard identity.
+	if filepath.Base(path) == "statev2.sqlite" {
+		path = filepath.Join(filepath.Dir(path), "state.sqlite")
+	}
+	sum := sha256.Sum256([]byte(path))
 	return fmt.Sprintf("t3:%x:", sum[:8])
 }
 

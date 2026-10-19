@@ -113,13 +113,31 @@ history cap; the table paginates them. No T3 plugin, agent tool call or open tab
 required. The collector reads metadata, turn timing and provider counters without
 reading prompt text or displaying tool payloads.
 
-This collector supports T3's V1 projections. If `statev2.sqlite` appears in the
-default environment, it reports Orchestrator V2 as unsupported rather than
-silently reading the now-independent legacy database. Explicit V2 databases are
-also detected and reported unavailable. V2 collection requires a separate schema
-adapter. To intentionally monitor a V1 instance alongside V2, configure its
-`state.sqlite` path explicitly with `-t3-db`.
+The collector supports both V1 `state.sqlite` and Orchestrator V2
+`statev2.sqlite`. When the default environment upgrades, it switches to V2 and
+keeps imported thread identities stable. V2 reads its current thread, run,
+provider-turn and tool-node projections; the frozen legacy tables are never used
+as a live fallback. All non-deleted threads are included, including delegated
+child threads, archived history and threads with no assistant output. Independent
+environments retain separate identities.
 
+V2 live snapshots use the same local authenticated shell endpoint with
+`x-t3-orchestration-protocol: 2`. Working, connecting, waiting and background
+monitoring states come from that runtime, so quiet work stays active without
+recent transcript writes. Persisted running metadata alone never counts as live.
+Unknown schema or runtime states produce an unavailable source and recover on a
+later poll. V2 shell responses allow up to 64 MiB of decompressed JSON, including
+active and archived history; V1 keeps its 8 MiB limit. Larger responses are
+unavailable rather than partially counted. A V2 run waiting for checkpoint
+capture appears as working; only a pending approval or input request appears as
+waiting for the user. Explicitly configure `state.sqlite` to monitor a separate
+V1 instance;
+an upgraded runtime cannot validate its frozen V1 copy as live.
+
+V2 statistics use distinct tool nodes and the latest provider-turn counter
+snapshot, with current provider-thread context usage. Unreported totals remain
+`n/a`; zero remains zero. Only metadata and selected counter fields are read
+from V2 JSON projections, excluding prompt text and tool inputs/outputs.
 T3 rows show connecting, working, monitoring, waiting for approval/input, idle,
 stopped or error state. Pulse counts verified connecting, working, monitoring and
 waiting threads. Quiet tools and background monitoring stay active regardless of
@@ -135,7 +153,7 @@ same OS account, it runs the installed T3 CLI's
 `auth pairing create --base-dir <environment> --ttl 1m --json`, then exchanges
 that one-time credential at `/oauth/token`, requesting only `orchestration:read`.
 When the CLI advertises `--scope`, the pairing grant itself also requests
-`orchestration:read`. Older compatible CLIs, including 0.0.45, have no scope
+`orchestration:read`. Older V1-compatible CLIs, including 0.0.45, have no scope
 flag: their grant carries standard client scopes, expires after one minute,
 is single-use, and is immediately narrowed at the verified local server.
 The resulting bearer always has exactly `orchestration:read`.
@@ -146,7 +164,9 @@ or runtime restart. Renewal uses a new local pairing grant; an HTTP 401/403 clea
 the token and retries on the next poll. No token belongs in service arguments,
 environment variables, files, logs or dashboard payloads.
 
-Install a T3 CLI compatible with the running server and expose it on the agent's
+V2 requires a CLI compatible with the current server: an old V1 CLI can create
+a pairing grant in the legacy database that the V2 server cannot exchange.
+Install a matching T3 CLI and expose it on the agent's
 PATH, or pass `-t3-bin /absolute/path/to/t3`. On Windows, use the native `t3.exe`,
 not an npm `.cmd` or PowerShell wrapper. The agent also discovers the native
 binary beside the standard npm launcher. That installation stores it
@@ -176,8 +196,10 @@ replace previous counters rather than adding to them. `n/a` means the provider d
 not report that metric; zero remains zero. Context usage is separate from total
 processed tokens. Claude and Codex report different subsets, and these values are
 provider telemetry, not billing totals. T3 costs are unavailable. A native Claude
-transcript with the same T3 provider session/thread ID is excluded so the session
-and Pulse count once. Fresh native Claude output remains expandable on the T3 row.
+transcript associated with a T3 provider session/thread is excluded so the session
+and Pulse count once. V2 retains every linked Claude native identity across
+provider switches, including switches to Codex. The newest linked native output
+remains expandable on the app thread.
 If T3 metadata is inactive or unavailable while the native transcript has fresh
 writes, the row explicitly says "Claude transcript active" and Pulse counts that
 independent activity once. Its T3 state remains visible, statistics are marked
@@ -186,7 +208,7 @@ cached, and unavailable turn timing is not inferred from transcript lifetime.
 Configure each environment with a repeated flag, or disable collection explicitly:
 
 ```bash
-./hs-pi-dashboard agent -addr <tailscale-ip>:8787 -t3-db /path/to/userdata/state.sqlite
+./hs-pi-dashboard agent -addr <tailscale-ip>:8787 -t3-db /path/to/userdata/statev2.sqlite
 ./hs-pi-dashboard agent -addr <tailscale-ip>:8787 -t3-db /first/state.sqlite -t3-db /second/state.sqlite
 ./hs-pi-dashboard agent -addr <tailscale-ip>:8787 -t3-db ~/.t3-server/userdata/state.sqlite -t3-bin /path/to/t3
 ./hs-pi-dashboard agent -addr <tailscale-ip>:8787 -t3-db off
@@ -201,7 +223,11 @@ interface; schema changes may require a dashboard update.
 
 For fleet rollout, build all OS targets from the same reviewed revision with
 `python deploy/build_fleet.py`, then replace and restart **every dashboard agent**
-and Mini's dashboard server with that build. Configure database paths on the machine
+and Mini's dashboard server with that build. Transfer macOS executables in a tar
+archive, extract into a staging directory with a command-line tool, and verify
+the executable SHA-256 before launch. Direct Taildrop executable downloads can
+acquire quarantine metadata and stall before the program starts.
+Configure database paths on the machine
 that owns each T3 environment, under the user account that can read its userdata.
 Check each agent's `/sessions` source health and the dashboard's `/api/fleet` payload.
 The dashboard can be opened in T3's browser panel as an ordinary page. Merge and

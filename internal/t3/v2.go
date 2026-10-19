@@ -1,0 +1,116 @@
+package t3
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"time"
+
+	"github.com/HemSoft/hs-pi-dashboard/internal/sessions"
+)
+
+// Select only metadata from V2 projections. Messages, tool inputs/outputs and
+// event payloads never cross the SQLite boundary. The legacy tables retained in
+// statev2.sqlite are an import snapshot, not a source of current threads.
+// Aggregate history counts once instead of repeating random table reads for
+// each thread. This leaves the polling deadline available for runtime pairing.
+const v2ClaudeIdentities = `SELECT thread_id,
+ json_group_array(DISTINCT json_extract(payload_json,'$.nativeThreadRef.nativeId')) ids
+ FROM orchestration_v2_projection_provider_threads
+ WHERE COALESCE(driver,json_extract(payload_json,'$.driver'),json_extract(payload_json,'$.nativeThreadRef.driver'),provider)='claudeAgent'
+ AND json_type(payload_json,'$.nativeThreadRef.nativeId')='text'
+ AND json_extract(payload_json,'$.nativeThreadRef.nativeId')<>'' GROUP BY thread_id`
+
+const v2ThreadsQuery = `WITH claude_ids AS (` + v2ClaudeIdentities + `) SELECT t.thread_id,t.title,COALESCE(p.title,''),
+ COALESCE(json_extract(t.payload_json,'$.worktreePath'),p.workspace_root,''),
+ t.created_at,t.updated_at,COALESCE(t.archived_at,''),
+ COALESCE(json_extract(t.payload_json,'$.modelSelection'),'{}'),
+ COALESCE(pt.driver,t.default_provider),
+ COALESCE(json_extract(pt.payload_json,'$.nativeThreadRef.nativeId'),''),COALESCE(claude.ids,'[]'),
+ COALESCE(json_extract(r.payload_json,'$.startedAt'),r.requested_at,''),COALESCE(r.completed_at,''),
+ COALESCE(messages.n,0),
+ COALESCE(nodes.n,0),
+ json_object(
+ 'inputTokens',json_extract(turn.payload_json,'$.tokenUsage.inputTokens'),
+ 'outputTokens',json_extract(turn.payload_json,'$.tokenUsage.outputTokens'),
+ 'totalTokens',json_extract(turn.payload_json,'$.tokenUsage.totalProcessedTokens'),
+ 'cacheReadTokens',json_extract(turn.payload_json,'$.tokenUsage.cachedInputTokens'),
+ 'reasoningTokens',json_extract(turn.payload_json,'$.tokenUsage.reasoningOutputTokens'),
+ 'contextTokens',COALESCE(json_extract(pt.payload_json,'$.contextUsage.usedTokens'),json_extract(turn.payload_json,'$.tokenUsage.usedTokens')),
+ 'contextLimit',COALESCE(json_extract(pt.payload_json,'$.contextUsage.maxTokens'),json_extract(turn.payload_json,'$.tokenUsage.maxTokens')))
+ FROM orchestration_v2_projection_threads t
+ LEFT JOIN (SELECT thread_id,COUNT(*) n FROM orchestration_v2_projection_messages WHERE role IN ('user','assistant') GROUP BY thread_id) messages ON messages.thread_id=t.thread_id
+ LEFT JOIN (SELECT thread_id,COUNT(*) n FROM orchestration_v2_projection_nodes WHERE kind='tool_call' GROUP BY thread_id) nodes ON nodes.thread_id=t.thread_id
+ LEFT JOIN claude_ids claude ON claude.thread_id=t.thread_id
+ LEFT JOIN projection_projects p ON p.project_id=t.project_id
+ LEFT JOIN orchestration_v2_projection_provider_threads pt ON pt.provider_thread_id=t.active_provider_thread_id
+ LEFT JOIN orchestration_v2_projection_runs r ON r.rowid=(
+ SELECT rowid FROM orchestration_v2_projection_runs WHERE thread_id=t.thread_id ORDER BY ordinal DESC,rowid DESC LIMIT 1)
+ LEFT JOIN orchestration_v2_projection_provider_turns turn ON turn.rowid=(
+ SELECT rowid FROM orchestration_v2_projection_provider_turns WHERE provider_thread_id=t.active_provider_thread_id ORDER BY ordinal DESC,rowid DESC LIMIT 1)
+ WHERE t.deleted_at IS NULL ORDER BY t.thread_id`
+
+const v2IdentityQuery = `WITH claude_ids AS (` + v2ClaudeIdentities + `) SELECT COALESCE(json_extract(pt.payload_json,'$.nativeThreadRef.nativeId'),''),COALESCE(pt.driver,t.default_provider),COALESCE(claude.ids,'[]')
+ FROM orchestration_v2_projection_threads t
+ LEFT JOIN orchestration_v2_projection_provider_threads pt ON pt.provider_thread_id=t.active_provider_thread_id
+ LEFT JOIN claude_ids claude ON claude.thread_id=t.thread_id
+ WHERE t.thread_id=? AND t.deleted_at IS NULL`
+
+func (c *Collector) readV2Threads(ctx context.Context, tx *sql.Tx) ([]sessions.Summary, error) {
+	rows, err := tx.QueryContext(ctx, v2ThreadsQuery)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []sessions.Summary
+	for rows.Next() {
+		var row sessions.Summary
+		var id, created, updated, archived, model, started, completed, usage, claudeIDs string
+		if err := rows.Scan(&id, &row.Name, &row.Project, &row.Cwd, &created, &updated, &archived,
+			&model, &row.Provider, &row.ProviderThreadID, &claudeIDs, &started, &completed, &row.MessageCount, &row.ToolCallCount, &usage); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal([]byte(claudeIDs), &row.ClaudeSessionIDs); err != nil {
+			return nil, err
+		}
+		var selection struct {
+			Model   string          `json:"model"`
+			Options json.RawMessage `json:"options"`
+		}
+		if err := json.Unmarshal([]byte(model), &selection); err != nil {
+			return nil, err
+		}
+		row.Model = selection.Model
+		row.ThinkingLevel, err = modelEffort(selection.Options)
+		if err != nil {
+			return nil, err
+		}
+		var counters sessions.T3Usage
+		if err := json.Unmarshal([]byte(usage), &counters); err != nil {
+			return nil, err
+		}
+		if counters != (sessions.T3Usage{}) {
+			row.T3Usage = &counters
+		}
+		row.ID, row.Source = c.prefix()+id, "t3"
+		row.ProviderSessionID = row.ProviderThreadID
+		row.StartedAt, row.LastActivity = parseTime(created), parseTime(updated)
+		row.TurnStartedAt, row.TurnCompletedAt = optionalTime(started), optionalTime(completed)
+		// Persisted work is never liveness authority. The verified runtime below
+		// supplies current states, including long quiet turns and monitoring.
+		row.Status = "idle"
+		if archived != "" {
+			row.Status = "stopped"
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
+func optionalTime(value string) *time.Time {
+	at := parseTime(value)
+	if at.IsZero() {
+		return nil
+	}
+	return &at
+}
