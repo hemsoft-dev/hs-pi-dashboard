@@ -212,11 +212,18 @@ func (c *Collector) Poll() sessions.Snapshot {
 				if identityErr != nil && !errors.Is(identityErr, sql.ErrNoRows) {
 					return c.unavailable(now, "T3 provider identities unavailable")
 				}
+				turnStart, turnEnd := thread.ActivityRunStartedAt, thread.LatestRunCompletedAt
+				if turnStart == "" {
+					turnStart = thread.LatestRunStartedAt
+				}
+				if thread.runningTurn() {
+					turnEnd = ""
+				}
 				rows = append(rows, sessions.Summary{ID: c.prefix() + thread.ID, Source: "t3", Name: thread.Title,
 					Project: thread.Project, Cwd: thread.Cwd, StartedAt: parseTime(thread.CreatedAt), LastActivity: parseTime(thread.UpdatedAt),
 					Provider: provider, ProviderSessionID: sessionID, ProviderThreadID: providerID,
 					Model: thread.ModelSelection.Model, ThinkingLevel: effort, Status: status, Active: active,
-					TurnStartedAt: optionalTime(thread.ActivityRunStartedAt), TurnCompletedAt: optionalTime(thread.LatestRunCompletedAt)})
+					TurnStartedAt: optionalTime(turnStart), TurnCompletedAt: optionalTime(turnEnd)})
 			}
 		}
 	}

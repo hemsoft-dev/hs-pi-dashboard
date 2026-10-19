@@ -148,7 +148,7 @@ same OS account, it runs the installed T3 CLI's
 `auth pairing create --base-dir <environment> --ttl 1m --json`, then exchanges
 that one-time credential at `/oauth/token`, requesting only `orchestration:read`.
 When the CLI advertises `--scope`, the pairing grant itself also requests
-`orchestration:read`. Older compatible CLIs, including 0.0.45, have no scope
+`orchestration:read`. Older V1-compatible CLIs, including 0.0.45, have no scope
 flag: their grant carries standard client scopes, expires after one minute,
 is single-use, and is immediately narrowed at the verified local server.
 The resulting bearer always has exactly `orchestration:read`.
@@ -159,7 +159,9 @@ or runtime restart. Renewal uses a new local pairing grant; an HTTP 401/403 clea
 the token and retries on the next poll. No token belongs in service arguments,
 environment variables, files, logs or dashboard payloads.
 
-Install a T3 CLI compatible with the running server and expose it on the agent's
+V2 requires a CLI compatible with the current server: an old V1 CLI can create
+a pairing grant in the legacy database that the V2 server cannot exchange.
+Install a matching T3 CLI and expose it on the agent's
 PATH, or pass `-t3-bin /absolute/path/to/t3`. On Windows, use the native `t3.exe`,
 not an npm `.cmd` or PowerShell wrapper. The agent also discovers the native
 binary beside the standard npm launcher. That installation stores it

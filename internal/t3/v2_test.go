@@ -200,10 +200,10 @@ func TestV2LiveCreationTimingAndTerminalPrecedence(t *testing.T) {
 	db, c, now := v2Fixture(t)
 	f, _ := attachRuntime(t, c)
 	f.v2 = true
-	f.threads = []liveThread{{ID: "between-snapshots", Status: "running", Title: "New V2", ActivityRunStartedAt: now.Format(time.RFC3339Nano)}}
+	f.threads = []liveThread{{ID: "between-snapshots", Status: "running", Title: "New V2", LatestRunStartedAt: now.Format(time.RFC3339Nano), LatestRunCompletedAt: now.Add(-time.Minute).Format(time.RFC3339Nano)}}
 	f.beforeShell = func() { v2Thread(t, db, "between-snapshots", now) }
 	snap := c.Poll()
-	if len(snap.Sessions) != 1 || snap.ActiveSessions != 1 || snap.Sessions[0].ProviderThreadID != "native-between-snapshots" {
+	if len(snap.Sessions) != 1 || snap.ActiveSessions != 1 || snap.Sessions[0].ProviderThreadID != "native-between-snapshots" || snap.Sessions[0].TurnStartedAt == nil || !snap.Sessions[0].TurnStartedAt.Equal(now) || snap.Sessions[0].TurnCompletedAt != nil {
 		t.Fatalf("live creation: %+v", snap)
 	}
 	// A queued run must not replace the actual active run's duration.
