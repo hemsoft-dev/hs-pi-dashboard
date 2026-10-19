@@ -1,5 +1,5 @@
 // Package usage fetches provider plan/balance data for the dashboard cards:
-// Codex and OpenCode Go plan windows, Antigravity quota pools, and OpenCode
+// Codex, Claude and OpenCode Go plan windows, Antigravity quota pools, and OpenCode
 // Zen + Moonshot prepaid balances.
 //
 // The fetchers port the proven logic from ~/.pi/agent/extensions/statusline.ts
@@ -173,7 +173,7 @@ func (s *Store) Snapshot() Snapshot {
 // fail return a card carrying the error; nothing panics or blocks long.
 func (f *Fetcher) FetchAll(ctx context.Context) []Card {
 	fetchers := [](func(context.Context) Card){
-		f.codex, f.opencodeGo, f.antigravity, f.opencodeZen, f.moonshot,
+		f.codex, f.opencodeGo, f.antigravity, f.opencodeZen, f.moonshot, f.claude,
 	}
 	cards := make([]Card, len(fetchers))
 	var wg sync.WaitGroup
