@@ -42,7 +42,7 @@ const v2ThreadsQuery = `SELECT t.thread_id,t.title,COALESCE(p.title,''),
  SELECT rowid FROM orchestration_v2_projection_provider_turns WHERE provider_thread_id=t.active_provider_thread_id ORDER BY ordinal DESC,rowid DESC LIMIT 1)
  WHERE t.deleted_at IS NULL ORDER BY t.thread_id`
 
-const v2IdentityQuery = `SELECT COALESCE(json_extract(pt.payload_json,'$.nativeThreadRef.nativeId'),'')
+const v2IdentityQuery = `SELECT COALESCE(json_extract(pt.payload_json,'$.nativeThreadRef.nativeId'),''),COALESCE(pt.driver,t.default_provider)
  FROM orchestration_v2_projection_threads t
  LEFT JOIN orchestration_v2_projection_provider_threads pt ON pt.provider_thread_id=t.active_provider_thread_id
  WHERE t.thread_id=? AND t.deleted_at IS NULL`

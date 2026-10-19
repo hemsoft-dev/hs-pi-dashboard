@@ -204,7 +204,7 @@ func (c *Collector) Poll() sessions.Snapshot {
 				var sessionID, providerID string
 				var identityErr error
 				if v2 > 0 {
-					identityErr = db.QueryRowContext(ctx, v2IdentityQuery, thread.ID).Scan(&providerID)
+					identityErr = db.QueryRowContext(ctx, v2IdentityQuery, thread.ID).Scan(&providerID, &provider)
 					sessionID = providerID
 				} else {
 					identityErr = db.QueryRowContext(ctx, `SELECT COALESCE(provider_session_id,''),COALESCE(provider_thread_id,'') FROM projection_thread_sessions WHERE thread_id=?`, thread.ID).Scan(&sessionID, &providerID)

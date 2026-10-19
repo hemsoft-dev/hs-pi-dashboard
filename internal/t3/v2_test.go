@@ -201,10 +201,16 @@ func TestV2LiveCreationTimingAndTerminalPrecedence(t *testing.T) {
 	f, _ := attachRuntime(t, c)
 	f.v2 = true
 	f.threads = []liveThread{{ID: "between-snapshots", Status: "running", Title: "New V2", LatestRunStartedAt: now.Format(time.RFC3339Nano), LatestRunCompletedAt: now.Add(-time.Minute).Format(time.RFC3339Nano)}}
+	f.threads[0].ModelSelection.Instance = "claude-custom-instance"
 	f.beforeShell = func() { v2Thread(t, db, "between-snapshots", now) }
 	snap := c.Poll()
-	if len(snap.Sessions) != 1 || snap.ActiveSessions != 1 || snap.Sessions[0].ProviderThreadID != "native-between-snapshots" || snap.Sessions[0].TurnStartedAt == nil || !snap.Sessions[0].TurnStartedAt.Equal(now) || snap.Sessions[0].TurnCompletedAt != nil {
+	if len(snap.Sessions) != 1 || snap.ActiveSessions != 1 || snap.Sessions[0].ProviderThreadID != "native-between-snapshots" || snap.Sessions[0].Provider != "claudeAgent" || snap.Sessions[0].TurnStartedAt == nil || !snap.Sessions[0].TurnStartedAt.Equal(now) || snap.Sessions[0].TurnCompletedAt != nil {
 		t.Fatalf("live creation: %+v", snap)
+	}
+	native := sessions.Summary{ID: "claude-code:native-between-snapshots", Provider: "claude-code", Active: true, LastActivity: now}
+	merged := sessions.MergeSnapshots(snap, sessions.Snapshot{Sessions: []sessions.Summary{native}})
+	if len(merged.Sessions) != 1 || merged.ActiveSessions != 1 {
+		t.Fatal("new live Claude thread duplicated native activity")
 	}
 	// A queued run must not replace the actual active run's duration.
 	exec(t, db, `INSERT INTO orchestration_v2_projection_runs VALUES('between-snapshots',2,?,NULL,'{}')`, now.Add(time.Minute).Format(time.RFC3339Nano))
