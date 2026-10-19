@@ -268,3 +268,31 @@ test('source failure and offline summaries keep highlighted status, preserve det
   machine.online=false; rows.forEach(row => {row.active=true;});
   assert.doesNotMatch(r.sessionsTable([machine], []),/<tr class="active[ "]/);
 });
+
+test('T3 sidebar labels override activity text, including explicit no-badge and limit states', () => {
+  const r = renderer();
+  for (const label of ['Working','Goal','Waiting','Approval','Input','Limited','Failed','Woke','Done']) {
+    const html=r.sessionsTable([{name:'mini',online:true,sessions:[t3({status:'working',t3Status:label})]}],[]);
+    assert.ok(html.includes(`>${label}</span>`), `${label} label missing`);
+  }
+  const ready=r.sessionsTable([{name:'mini',online:true,sessions:[t3({t3Status:''})]}],[]);
+  assert.doesNotMatch(ready,/session-state/);
+});
+
+test('source badges fail closed offline and refresh without inventing activity', () => {
+ const r=renderer();
+ for(const online of [true,false]) {
+  const html=r.sessionsTable([{name:'mini',online,sessions:[t3({status:'unavailable',t3Status:'Working'})]}],[]);
+  assert.ok(html.includes(online?'>unavailable</span>':'>offline</span>'));
+  assert.doesNotMatch(html,/>Working<\/span>/);
+ }
+ const get=(s)=>r.sessionsTable([{name:'mini',online:true,sessions:[s]}],[]);
+ const limited=t3({status:'error',t3Status:'Limited',active:false});
+ assert.doesNotMatch(get(limited),/<tr class="active"/);
+ const signature=s=>vm.runInContext("sessionSig",r)(s);
+ assert.notEqual(signature(t3()),signature(t3({t3Status:''})));
+ assert.notEqual(signature(limited),signature({...limited,t3Status:'Failed'}));
+ const unsafe=get(t3({t3Status:'<script>bad</script>'}));
+ assert.match(unsafe,/&lt;script&gt;bad&lt;\/script&gt;/);
+ assert.doesNotMatch(unsafe,/<script>bad/);
+});
