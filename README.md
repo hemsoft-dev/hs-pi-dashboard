@@ -138,8 +138,28 @@ V2 statistics use distinct tool nodes and the latest provider-turn counter
 snapshot, with current provider-thread context usage. Unreported totals remain
 `n/a`; zero remains zero. Only metadata and selected counter fields are read
 from V2 JSON projections, excluding prompt text and tool inputs/outputs.
-T3 rows show connecting, working, monitoring, waiting for approval/input, idle,
-stopped or error state. Pulse counts verified connecting, working, monitoring and
+T3 V2 rows show the sidebar status separately from activity: **Working**, **Goal**,
+**Waiting**, **Approval**, **Input**, **Limited**, **Failed**, **Woke**, or **Done**.
+A ready, acknowledged thread has no badge. Working stays green. Approval and
+input, including requests from live app-owned subagents, take precedence over
+runtime work; usage-limit failures show Limited until recovery. Done and Woke
+use the server's visit and snooze metadata. Missing visited metadata never
+invents an unread completion, and unavailable/offline sources override cached
+labels. V1 and older dashboard agents retain their existing normalized labels.
+
+The mapping follows T3 Code's current sidebar at
+[`1451e7cb2303`](https://github.com/pingdotgg/t3code/blob/1451e7cb23034d29774338608368a15d8845df36/apps/web/src/components/Sidebar.logic.ts#L922)
+and its shell presentation rules, rather than the older status-pill helper.
+The fleet's local Waiting patch also treats background command tasks as waiting;
+unpatched upstream only lets subagent, monitor and background-task kinds hold
+completion. A checkpoint-only run remains Working. The agent exposes this
+source-backed label in optional `t3Status`; an empty string means no badge.
+The separate `status` and `active` fields continue to describe verified activity.
+Label changes alone do not alter Pulse, so a Waiting badge on an idle runtime
+need not count as live work.
+
+Legacy activity states include connecting, working, monitoring, waiting, idle,
+stopped and error. Pulse counts verified connecting, working, monitoring and
 waiting threads. Quiet tools and background monitoring stay active regardless of
 `-active-window`; that flag still controls native transcript activity. Open,
 snoozed or unsettled threads are not active merely because they exist. The table

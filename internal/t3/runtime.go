@@ -52,14 +52,31 @@ type liveThread struct {
 		Model    string          `json:"model"`
 		Options  json.RawMessage `json:"options"`
 	} `json:"modelSelection"`
-	LatestRunStartedAt   string  `json:"latestRunStartedAt"`
-	LatestRunCompletedAt string  `json:"latestRunCompletedAt"`
-	ActivityRunStartedAt string  `json:"activityRunStartedAt"`
-	V2                   bool    `json:"-"`
-	Status               string  `json:"status"`
-	ActivityRunStatus    string  `json:"activityRunStatus"`
-	DeletedAt            *string `json:"deletedAt"`
-	PendingRequest       *struct {
+	LatestRunStartedAt     string `json:"latestRunStartedAt"`
+	LatestRunCompletedAt   string `json:"latestRunCompletedAt"`
+	ActivityRunStartedAt   string `json:"activityRunStartedAt"`
+	V2                     bool   `json:"-"`
+	Status                 string `json:"status"`
+	ActivityRunStatus      string `json:"activityRunStatus"`
+	completionPresent      bool
+	activityStatusPresent  bool
+	LatestRunID            *string `json:"latestRunId"`
+	ActiveProviderThreadID *string `json:"activeProviderThreadId"`
+	LastErrorClass         string  `json:"lastErrorClass"`
+	LastVisitedAt          *string `json:"lastVisitedAt"`
+	SnoozedAt              *string `json:"snoozedAt"`
+	SnoozedUntil           *string `json:"snoozedUntil"`
+	SettledOverride        *string `json:"settledOverride"`
+	CreationSource         string  `json:"creationSource"`
+	Goal                   *struct {
+		Status string `json:"status"`
+	} `json:"goal"`
+	Lineage struct {
+		ParentThreadID *string `json:"parentThreadId"`
+		Relationship   string  `json:"relationshipToParent"`
+	} `json:"lineage"`
+	DeletedAt      *string `json:"deletedAt"`
+	PendingRequest *struct {
 		Kind string `json:"kind"`
 	} `json:"pendingRuntimeRequest"`
 	PendingBackground []struct {

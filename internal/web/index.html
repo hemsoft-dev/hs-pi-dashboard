@@ -267,6 +267,9 @@
   .session-state.working, .session-state.monitoring { color: #7ce3a3; }
   .session-state.waiting, .session-state.connecting { color: var(--gold); }
   .session-state.error, .session-state.unavailable { color: #ffab91; }
+  .session-state.input { color: #b4b4ff; }
+  .session-state.limited, .session-state.woke { color: var(--gold); }
+  .session-state.done { color: #7ce3a3; }
   .session-table .t3-details td { padding-top: 0; white-space: normal; }
   .t3-metrics { display: flex; flex-wrap: wrap; gap: 4px 18px; color: var(--text); font-size: 10px; line-height: 1.6; }
   .t3-metrics span { white-space: nowrap; }
@@ -1015,9 +1018,27 @@ const sessionSig = (s) => {
   return [s.id, project, s.provider || "", s.model || "", s.thinkingLevel || "",
     s.messageCount || 0, s.toolCallCount || 0, s.inputTokens || 0, s.outputTokens || 0,
     +(s.costUsd || 0).toFixed(4), !!s.active, s.lastActivity || "",
-    s.name || "", s.status || "", s.activitySource || "", s.turnStartedAt || "", s.turnCompletedAt || "", JSON.stringify(s.t3Usage || null),
+    s.name || "", s.status || "", JSON.stringify(s.t3Status ?? null), s.activitySource || "", s.turnStartedAt || "", s.turnCompletedAt || "", JSON.stringify(s.t3Usage || null),
     (s.outputs || []).map((o) => o.at).join(",")].join("|");
 };
+// A present empty source label deliberately has no badge. Older agents keep
+// their normalized states, while offline/source failures override cached labels.
+function t3StatusMarkup(s, online) {
+  let label, state;
+  if (!online || s.status === "unavailable") {
+    label = online ? "unavailable" : "offline";
+    state = "unavailable";
+  } else if (typeof s.t3Status === "string") {
+    label = s.t3Status;
+    state = ({ Working: "working", Goal: "working", Waiting: "background-waiting",
+      Approval: "waiting", Input: "input", Limited: "limited", Failed: "error",
+      Woke: "woke", Done: "done" })[label] || "unknown";
+  } else {
+    label = s.status || "unknown";
+    state = label;
+  }
+  return label ? ` · <span class="session-state ${esc(state)}">${esc(label)}</span>` : "";
+}
 let lastSigs = {};
 let sessionBaselineReady = false;
 let activeFlashDetected = false;
@@ -1199,7 +1220,7 @@ function sessionRow(s, m, flash, kind, avail, expandedNow, key, detailsId) {
   return `
   <tr${attrs}>
     <td>${esc(m.name)}</td>
-    <td class="title${isT3 ? " t3-title" : ""}" title="${esc(kind === "hermes" ? (s.source + ":" + s.id) : (s.cwd || ""))}">${title}<span class="session-meta"><span class="session-app">${applicationName(s)}</span>${isT3 ? ` · <span class="session-state ${esc(m.online ? s.status : "unavailable")}">${esc(m.online ? s.status : "offline")}</span>${s.activitySource === "claude-code" && live ? " · Claude transcript active" : ""} · ${esc(s.project || "repository unknown")}` : ""}</span></td>
+    <td class="title${isT3 ? " t3-title" : ""}" title="${esc(kind === "hermes" ? (s.source + ":" + s.id) : (s.cwd || ""))}">${title}<span class="session-meta"><span class="session-app">${applicationName(s)}</span>${isT3 ? `${t3StatusMarkup(s, m.online)}${s.activitySource === "claude-code" && live ? " · Claude transcript active" : ""} · ${esc(s.project || "repository unknown")}` : ""}</span></td>
     <td>${esc(provider)}</td>
     <td>${esc(model)}</td>
     <td>${esc(effort)}</td>

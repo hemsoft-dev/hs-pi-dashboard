@@ -142,6 +142,7 @@ func (c *Collector) Poll() sessions.Snapshot {
 			for i := range rows {
 				rows[i].Active = false
 				rows[i].Status = "unavailable"
+				rows[i].T3Status = nil
 			}
 			// Keep a thread first discovered through the live API visible if
 			// that API fails before SQLite catches up.
@@ -152,11 +153,13 @@ func (c *Collector) Poll() sessions.Snapshot {
 			for _, row := range c.last.Sessions {
 				if !seen[row.ID] {
 					row.Active, row.Status = false, "unavailable"
+					row.T3Status = nil
 					rows = append(rows, row)
 					seen[row.ID] = true
 				}
 			}
 		} else {
+			delegated := delegatedRequests(live)
 			states := map[string]liveThread{}
 			for _, thread := range live {
 				states[thread.ID] = thread
@@ -165,6 +168,7 @@ func (c *Collector) Poll() sessions.Snapshot {
 				id := strings.TrimPrefix(rows[i].ID, c.prefix())
 				if thread, ok := states[id]; ok {
 					rows[i].Status, rows[i].Active = thread.state()
+					rows[i].T3Status = thread.sidebarLabel(now, delegated[thread.ID])
 					if thread.V2 {
 						start := thread.ActivityRunStartedAt
 						if start == "" {
@@ -184,6 +188,7 @@ func (c *Collector) Poll() sessions.Snapshot {
 				} else {
 					rows[i].Active = false
 					rows[i].Status = "stopped"
+					rows[i].T3Status = nil
 				}
 			}
 			// A thread may start after the SQLite transaction. Include it from
@@ -226,7 +231,7 @@ func (c *Collector) Poll() sessions.Snapshot {
 				rows = append(rows, sessions.Summary{ID: c.prefix() + thread.ID, Source: "t3", Name: thread.Title,
 					Project: thread.Project, Cwd: thread.Cwd, StartedAt: parseTime(thread.CreatedAt), LastActivity: parseTime(thread.UpdatedAt),
 					Provider: provider, ProviderSessionID: sessionID, ProviderThreadID: providerID, ClaudeSessionIDs: historicalClaudeIDs,
-					Model: thread.ModelSelection.Model, ThinkingLevel: effort, Status: status, Active: active,
+					Model: thread.ModelSelection.Model, ThinkingLevel: effort, Status: status, Active: active, T3Status: thread.sidebarLabel(now, delegated[thread.ID]),
 					TurnStartedAt: optionalTime(turnStart), TurnCompletedAt: optionalTime(turnEnd)})
 			}
 		}
@@ -284,6 +289,7 @@ func (c *Collector) unavailable(now time.Time, reason string) sessions.Snapshot 
 	}
 	for _, row := range c.last.Sessions {
 		row.Active, row.Status = false, "unavailable"
+		row.T3Status = nil
 		snap.Sessions = append(snap.Sessions, row)
 	}
 	return snap

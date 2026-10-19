@@ -34,9 +34,12 @@ const DefaultActiveWindow = 2 * time.Minute
 
 // Summary is the dashboard-facing projection of one coding-agent session file.
 type Summary struct {
-	ActivitySource    string     `json:"activitySource,omitempty"`
-	Source            string     `json:"source,omitempty"`
-	Status            string     `json:"status,omitempty"`
+	ActivitySource string `json:"activitySource,omitempty"`
+	Source         string `json:"source,omitempty"`
+	Status         string `json:"status,omitempty"`
+	// T3Status is the source-backed sidebar label, independent of activity.
+	// Nil selects legacy presentation; a present empty string means no badge.
+	T3Status          *string    `json:"t3Status,omitempty"`
 	ProviderSessionID string     `json:"providerSessionId,omitempty"`
 	ClaudeSessionIDs  []string   `json:"claudeSessionIds,omitempty"`
 	ProviderThreadID  string     `json:"providerThreadId,omitempty"`
