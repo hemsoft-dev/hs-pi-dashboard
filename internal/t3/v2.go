@@ -12,6 +12,8 @@ import (
 // Select only metadata from V2 projections. Messages, tool inputs/outputs and
 // event payloads never cross the SQLite boundary. The legacy tables retained in
 // statev2.sqlite are an import snapshot, not a source of current threads.
+// Aggregate history counts once instead of repeating random table reads for
+// each thread. This leaves the polling deadline available for runtime pairing.
 const v2ThreadsQuery = `SELECT t.thread_id,t.title,COALESCE(p.title,''),
  COALESCE(json_extract(t.payload_json,'$.worktreePath'),p.workspace_root,''),
  t.created_at,t.updated_at,COALESCE(t.archived_at,''),
@@ -19,8 +21,8 @@ const v2ThreadsQuery = `SELECT t.thread_id,t.title,COALESCE(p.title,''),
  COALESCE(pt.driver,t.default_provider),
  COALESCE(json_extract(pt.payload_json,'$.nativeThreadRef.nativeId'),''),
  COALESCE(json_extract(r.payload_json,'$.startedAt'),r.requested_at,''),COALESCE(r.completed_at,''),
- (SELECT COUNT(*) FROM orchestration_v2_projection_messages m WHERE m.thread_id=t.thread_id AND m.role IN ('user','assistant')),
- (SELECT COUNT(*) FROM orchestration_v2_projection_nodes n WHERE n.thread_id=t.thread_id AND n.kind='tool_call'),
+ COALESCE(messages.n,0),
+ COALESCE(nodes.n,0),
  json_object(
  'inputTokens',json_extract(turn.payload_json,'$.tokenUsage.inputTokens'),
  'outputTokens',json_extract(turn.payload_json,'$.tokenUsage.outputTokens'),
@@ -30,6 +32,8 @@ const v2ThreadsQuery = `SELECT t.thread_id,t.title,COALESCE(p.title,''),
  'contextTokens',COALESCE(json_extract(pt.payload_json,'$.contextUsage.usedTokens'),json_extract(turn.payload_json,'$.tokenUsage.usedTokens')),
  'contextLimit',COALESCE(json_extract(pt.payload_json,'$.contextUsage.maxTokens'),json_extract(turn.payload_json,'$.tokenUsage.maxTokens')))
  FROM orchestration_v2_projection_threads t
+ LEFT JOIN (SELECT thread_id,COUNT(*) n FROM orchestration_v2_projection_messages WHERE role IN ('user','assistant') GROUP BY thread_id) messages ON messages.thread_id=t.thread_id
+ LEFT JOIN (SELECT thread_id,COUNT(*) n FROM orchestration_v2_projection_nodes WHERE kind='tool_call' GROUP BY thread_id) nodes ON nodes.thread_id=t.thread_id
  LEFT JOIN projection_projects p ON p.project_id=t.project_id
  LEFT JOIN orchestration_v2_projection_provider_threads pt ON pt.provider_thread_id=t.active_provider_thread_id
  LEFT JOIN orchestration_v2_projection_runs r ON r.rowid=(
