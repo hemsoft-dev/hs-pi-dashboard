@@ -216,7 +216,11 @@ interface; schema changes may require a dashboard update.
 
 For fleet rollout, build all OS targets from the same reviewed revision with
 `python deploy/build_fleet.py`, then replace and restart **every dashboard agent**
-and Mini's dashboard server with that build. Configure database paths on the machine
+and Mini's dashboard server with that build. Transfer macOS executables in a tar
+archive, extract into a staging directory with a command-line tool, and verify
+the executable SHA-256 before launch. Direct Taildrop executable downloads can
+acquire quarantine metadata and stall before the program starts.
+Configure database paths on the machine
 that owns each T3 environment, under the user account that can read its userdata.
 Check each agent's `/sessions` source health and the dashboard's `/api/fleet` payload.
 The dashboard can be opened in T3's browser panel as an ordinary page. Merge and
