@@ -18,7 +18,7 @@ import (
 // tables deliberately coexist so accidentally reading the frozen import fails.
 const v2Schema = `
 CREATE TABLE orchestration_v2_projection_threads(thread_id TEXT PRIMARY KEY,project_id TEXT,title TEXT,default_provider TEXT,active_provider_thread_id TEXT,created_at TEXT,updated_at TEXT,archived_at TEXT,deleted_at TEXT,payload_json TEXT);
-CREATE TABLE orchestration_v2_projection_provider_threads(provider_thread_id TEXT PRIMARY KEY,thread_id TEXT,driver TEXT,payload_json TEXT);
+CREATE TABLE orchestration_v2_projection_provider_threads(provider_thread_id TEXT PRIMARY KEY,thread_id TEXT,driver TEXT,payload_json TEXT,provider TEXT);
 CREATE TABLE orchestration_v2_projection_runs(thread_id TEXT,ordinal INTEGER,requested_at TEXT,completed_at TEXT,payload_json TEXT);
 CREATE TABLE orchestration_v2_projection_provider_turns(provider_thread_id TEXT,ordinal INTEGER,payload_json TEXT);
 CREATE TABLE orchestration_v2_projection_messages(thread_id TEXT,role TEXT,payload_json TEXT);
@@ -41,7 +41,7 @@ func v2Thread(t *testing.T, db *sql.DB, id string, at time.Time) {
 	stamp := at.Format(time.RFC3339Nano)
 	exec(t, db, `INSERT INTO orchestration_v2_projection_threads VALUES(?,'project',?,'claudeAgent',?,?,?,NULL,NULL,?)`, id, "V2 "+id, "provider-"+id, stamp, stamp,
 		`{"worktreePath":"/repos/worktree","modelSelection":{"instanceId":"claude","model":"claude-test","options":{"effort":"high"}},"prompt":"private-prompt-secret"}`)
-	exec(t, db, `INSERT INTO orchestration_v2_projection_provider_threads VALUES(?,?,'claudeAgent',?)`, "provider-"+id, id,
+	exec(t, db, `INSERT INTO orchestration_v2_projection_provider_threads(provider_thread_id,thread_id,driver,payload_json) VALUES(?,?,'claudeAgent',?)`, "provider-"+id, id,
 		fmt.Sprintf(`{"nativeThreadRef":{"nativeId":%q},"contextUsage":{"usedTokens":30,"maxTokens":200},"nativeMetadata":{"prompt":"private-prompt-secret"}}`, "native-"+id))
 	exec(t, db, `INSERT INTO orchestration_v2_projection_runs VALUES(?,1,?,NULL,?)`, id, stamp, fmt.Sprintf(`{"startedAt":%q}`, stamp))
 	exec(t, db, `INSERT INTO orchestration_v2_projection_provider_turns VALUES(?,1,?)`, "provider-"+id,
@@ -112,6 +112,11 @@ func TestV2VerifiedStatesQuietWorkFailureAndRecovery(t *testing.T) {
 	for id, state := range states {
 		v2Thread(t, db, id, now.Add(-time.Hour))
 		live := liveThread{ID: id, Status: state}
+		if id == "wait" {
+			live.PendingRequest = &struct {
+				Kind string `json:"kind"`
+			}{Kind: "user_input"}
+		}
 		if id == "monitor" {
 			live.PendingBackground = append(live.PendingBackground, struct {
 				Kind string `json:"kind"`
@@ -202,13 +207,17 @@ func TestV2LiveCreationTimingAndTerminalPrecedence(t *testing.T) {
 	f.v2 = true
 	f.threads = []liveThread{{ID: "between-snapshots", Status: "running", Title: "New V2", LatestRunStartedAt: now.Format(time.RFC3339Nano), LatestRunCompletedAt: now.Add(-time.Minute).Format(time.RFC3339Nano)}}
 	f.threads[0].ModelSelection.Instance = "claude-custom-instance"
-	f.beforeShell = func() { v2Thread(t, db, "between-snapshots", now) }
+	f.beforeShell = func() {
+		v2Thread(t, db, "between-snapshots", now)
+		exec(t, db, `INSERT INTO orchestration_v2_projection_provider_threads(provider_thread_id,thread_id,driver,payload_json) VALUES('prior-provider','between-snapshots','claudeAgent','{"nativeThreadRef":{"nativeId":"prior-native"}}')`)
+	}
 	snap := c.Poll()
 	if len(snap.Sessions) != 1 || snap.ActiveSessions != 1 || snap.Sessions[0].ProviderThreadID != "native-between-snapshots" || snap.Sessions[0].Provider != "claudeAgent" || snap.Sessions[0].TurnStartedAt == nil || !snap.Sessions[0].TurnStartedAt.Equal(now) || snap.Sessions[0].TurnCompletedAt != nil {
 		t.Fatalf("live creation: %+v", snap)
 	}
 	native := sessions.Summary{ID: "claude-code:native-between-snapshots", Provider: "claude-code", Active: true, LastActivity: now}
-	merged := sessions.MergeSnapshots(snap, sessions.Snapshot{Sessions: []sessions.Summary{native}})
+	prior := sessions.Summary{ID: "claude-code:prior-native", Provider: "claude-code", Active: true, LastActivity: now}
+	merged := sessions.MergeSnapshots(snap, sessions.Snapshot{Sessions: []sessions.Summary{native, prior}})
 	if len(merged.Sessions) != 1 || merged.ActiveSessions != 1 {
 		t.Fatal("new live Claude thread duplicated native activity")
 	}

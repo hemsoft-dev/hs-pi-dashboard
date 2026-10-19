@@ -16,6 +16,13 @@ import (
 	"time"
 )
 
+// V2 includes complete active and archived shells with potentially large PR
+// link bodies. Bound decompressed data while allowing measured 17 MiB fleets.
+const (
+	maxLegacyShellBytes int64 = 8 << 20
+	maxV2ShellBytes     int64 = 64 << 20
+)
+
 // Runtime credentials never leave this collector's memory. The local T3 CLI
 // creates a one-time grant, exchanged for orchestration:read only.
 type runtimeSource struct {
@@ -151,6 +158,13 @@ func (r *runtimeSource) snapshot(ctx context.Context) ([]liveThread, error) {
 	if resp.StatusCode != http.StatusOK {
 		return nil, errors.New("T3 live runtime unavailable")
 	}
+	limit := maxLegacyShellBytes
+	if r.v2 {
+		limit = maxV2ShellBytes
+	}
+	if resp.ContentLength > limit {
+		return nil, errors.New("T3 live snapshot exceeds size limit")
+	}
 	var shell struct {
 		Threads         *[]liveThread `json:"threads"`
 		ArchivedThreads *[]liveThread `json:"archivedThreads"`
@@ -160,7 +174,7 @@ func (r *runtimeSource) snapshot(ctx context.Context) ([]liveThread, error) {
 			WorkspaceRoot string `json:"workspaceRoot"`
 		} `json:"projects"`
 	}
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 8<<20)).Decode(&shell); err != nil || shell.Threads == nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, limit)).Decode(&shell); err != nil || shell.Threads == nil {
 		return nil, errors.New("T3 live snapshot incompatible")
 	}
 	if r.v2 {
@@ -348,8 +362,6 @@ func (t liveThread) v2State() (string, bool) {
 		return "connecting", true
 	case "running":
 		return "working", true
-	case "waiting":
-		return "waiting", true
 	}
 	for _, task := range t.PendingBackground {
 		if task.Kind == "monitor" {
@@ -357,6 +369,11 @@ func (t liveThread) v2State() (string, bool) {
 		}
 	}
 	if len(t.PendingBackground) > 0 {
+		return "working", true
+	}
+	// V2 persists a successful provider turn as waiting until checkpoint
+	// capture finishes. Only PendingRequest above needs an operator response.
+	if status == "waiting" {
 		return "working", true
 	}
 	return "idle", false

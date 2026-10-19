@@ -201,11 +201,15 @@ func (c *Collector) Poll() sessions.Snapshot {
 				// The shell API deliberately omits provider resume identifiers.
 				// Re-read them after the earlier transaction so a newly started
 				// Claude thread can still deduplicate its native transcript.
-				var sessionID, providerID string
+				var sessionID, providerID, claudeIDs string
+				var historicalClaudeIDs []string
 				var identityErr error
 				if v2 > 0 {
-					identityErr = db.QueryRowContext(ctx, v2IdentityQuery, thread.ID).Scan(&providerID, &provider)
+					identityErr = db.QueryRowContext(ctx, v2IdentityQuery, thread.ID).Scan(&providerID, &provider, &claudeIDs)
 					sessionID = providerID
+					if identityErr == nil {
+						identityErr = json.Unmarshal([]byte(claudeIDs), &historicalClaudeIDs)
+					}
 				} else {
 					identityErr = db.QueryRowContext(ctx, `SELECT COALESCE(provider_session_id,''),COALESCE(provider_thread_id,'') FROM projection_thread_sessions WHERE thread_id=?`, thread.ID).Scan(&sessionID, &providerID)
 				}
@@ -221,7 +225,7 @@ func (c *Collector) Poll() sessions.Snapshot {
 				}
 				rows = append(rows, sessions.Summary{ID: c.prefix() + thread.ID, Source: "t3", Name: thread.Title,
 					Project: thread.Project, Cwd: thread.Cwd, StartedAt: parseTime(thread.CreatedAt), LastActivity: parseTime(thread.UpdatedAt),
-					Provider: provider, ProviderSessionID: sessionID, ProviderThreadID: providerID,
+					Provider: provider, ProviderSessionID: sessionID, ProviderThreadID: providerID, ClaudeSessionIDs: historicalClaudeIDs,
 					Model: thread.ModelSelection.Model, ThinkingLevel: effort, Status: status, Active: active,
 					TurnStartedAt: optionalTime(turnStart), TurnCompletedAt: optionalTime(turnEnd)})
 			}

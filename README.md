@@ -126,7 +126,12 @@ V2 live snapshots use the same local authenticated shell endpoint with
 monitoring states come from that runtime, so quiet work stays active without
 recent transcript writes. Persisted running metadata alone never counts as live.
 Unknown schema or runtime states produce an unavailable source and recover on a
-later poll. Explicitly configure `state.sqlite` to monitor a separate V1 instance;
+later poll. V2 shell responses allow up to 64 MiB of decompressed JSON, including
+active and archived history; V1 keeps its 8 MiB limit. Larger responses are
+unavailable rather than partially counted. A V2 run waiting for checkpoint
+capture appears as working; only a pending approval or input request appears as
+waiting for the user. Explicitly configure `state.sqlite` to monitor a separate
+V1 instance;
 an upgraded runtime cannot validate its frozen V1 copy as live.
 
 V2 statistics use distinct tool nodes and the latest provider-turn counter
@@ -191,8 +196,10 @@ replace previous counters rather than adding to them. `n/a` means the provider d
 not report that metric; zero remains zero. Context usage is separate from total
 processed tokens. Claude and Codex report different subsets, and these values are
 provider telemetry, not billing totals. T3 costs are unavailable. A native Claude
-transcript with the same T3 provider session/thread ID is excluded so the session
-and Pulse count once. Fresh native Claude output remains expandable on the T3 row.
+transcript associated with a T3 provider session/thread is excluded so the session
+and Pulse count once. V2 retains every linked Claude native identity across
+provider switches, including switches to Codex. The newest linked native output
+remains expandable on the app thread.
 If T3 metadata is inactive or unavailable while the native transcript has fresh
 writes, the row explicitly says "Claude transcript active" and Pulse counts that
 independent activity once. Its T3 state remains visible, statistics are marked

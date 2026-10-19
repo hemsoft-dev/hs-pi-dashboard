@@ -38,6 +38,7 @@ type Summary struct {
 	Source            string     `json:"source,omitempty"`
 	Status            string     `json:"status,omitempty"`
 	ProviderSessionID string     `json:"providerSessionId,omitempty"`
+	ClaudeSessionIDs  []string   `json:"claudeSessionIds,omitempty"`
 	ProviderThreadID  string     `json:"providerThreadId,omitempty"`
 	ToolCallCount     int        `json:"toolCallCount,omitempty"`
 	TurnStartedAt     *time.Time `json:"turnStartedAt,omitempty"`
@@ -203,8 +204,8 @@ func MergeSnapshots(snapshots ...Snapshot) Snapshot {
 			if row.Provider == "claude-code" {
 				nativeClaude[row.ID] = row
 			}
-			if row.Source == "t3" && row.Provider == "claudeAgent" {
-				for _, id := range []string{row.ProviderSessionID, row.ProviderThreadID} {
+			if row.Source == "t3" {
+				for _, id := range row.claudeSessionIDs() {
 					if id != "" {
 						claudeIDs["claude-code:"+id] = true
 					}
@@ -219,24 +220,35 @@ func MergeSnapshots(snapshots ...Snapshot) Snapshot {
 			continue
 		}
 		if row.Source == "t3" {
-			for _, id := range []string{row.ProviderSessionID, row.ProviderThreadID} {
-				if native, ok := nativeClaude["claude-code:"+id]; ok && row.Provider == "claudeAgent" {
-					// Keep T3 identity/state while preserving independent, fresh
-					// Claude activity and output. Cached T3 data itself stays idle.
-					row.Outputs = native.Outputs
-					if native.Active && !row.Active {
-						row.Active = true
-						row.ActivitySource = "claude-code"
-						row.TurnStartedAt, row.TurnCompletedAt = nil, nil
-					}
-					if native.LastActivity.After(row.LastActivity) {
-						row.LastActivity = native.LastActivity
-					}
-					if native.MessageCount > row.MessageCount {
-						row.MessageCount = native.MessageCount
-					}
-					break
+			var latestNative Summary
+			foundNative := false
+			for _, id := range row.claudeSessionIDs() {
+				if id == "" {
+					continue
 				}
+				native, ok := nativeClaude["claude-code:"+id]
+				if !ok {
+					continue
+				}
+				// A provider switch can leave several linked Claude sessions.
+				// Keep all their activity on one app row, with the newest output.
+				if !foundNative || native.LastActivity.After(latestNative.LastActivity) {
+					latestNative, foundNative = native, true
+				}
+				if native.Active && !row.Active {
+					row.Active = true
+					row.ActivitySource = "claude-code"
+					row.TurnStartedAt, row.TurnCompletedAt = nil, nil
+				}
+				if native.LastActivity.After(row.LastActivity) {
+					row.LastActivity = native.LastActivity
+				}
+				if native.MessageCount > row.MessageCount {
+					row.MessageCount = native.MessageCount
+				}
+			}
+			if foundNative {
+				row.Outputs = latestNative.Outputs
 			}
 			if seenT3[row.ID] {
 				continue
@@ -248,6 +260,16 @@ func MergeSnapshots(snapshots ...Snapshot) Snapshot {
 	out := summarize(dir, generatedAt, unique)
 	out.Sources = sources
 	return out
+}
+
+// Current provider fields retain V1 compatibility; V2 also supplies historical
+// Claude identities even when the active provider has changed to another driver.
+func (s Summary) claudeSessionIDs() []string {
+	ids := append([]string(nil), s.ClaudeSessionIDs...)
+	if s.Provider == "claudeAgent" {
+		ids = append(ids, s.ProviderSessionID, s.ProviderThreadID)
+	}
+	return ids
 }
 
 func summarize(dir string, now time.Time, summaries []Summary) Snapshot {

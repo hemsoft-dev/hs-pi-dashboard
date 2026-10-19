@@ -14,12 +14,19 @@ import (
 // statev2.sqlite are an import snapshot, not a source of current threads.
 // Aggregate history counts once instead of repeating random table reads for
 // each thread. This leaves the polling deadline available for runtime pairing.
-const v2ThreadsQuery = `SELECT t.thread_id,t.title,COALESCE(p.title,''),
+const v2ClaudeIdentities = `SELECT thread_id,
+ json_group_array(DISTINCT json_extract(payload_json,'$.nativeThreadRef.nativeId')) ids
+ FROM orchestration_v2_projection_provider_threads
+ WHERE COALESCE(driver,json_extract(payload_json,'$.driver'),json_extract(payload_json,'$.nativeThreadRef.driver'),provider)='claudeAgent'
+ AND json_type(payload_json,'$.nativeThreadRef.nativeId')='text'
+ AND json_extract(payload_json,'$.nativeThreadRef.nativeId')<>'' GROUP BY thread_id`
+
+const v2ThreadsQuery = `WITH claude_ids AS (` + v2ClaudeIdentities + `) SELECT t.thread_id,t.title,COALESCE(p.title,''),
  COALESCE(json_extract(t.payload_json,'$.worktreePath'),p.workspace_root,''),
  t.created_at,t.updated_at,COALESCE(t.archived_at,''),
  COALESCE(json_extract(t.payload_json,'$.modelSelection'),'{}'),
  COALESCE(pt.driver,t.default_provider),
- COALESCE(json_extract(pt.payload_json,'$.nativeThreadRef.nativeId'),''),
+ COALESCE(json_extract(pt.payload_json,'$.nativeThreadRef.nativeId'),''),COALESCE(claude.ids,'[]'),
  COALESCE(json_extract(r.payload_json,'$.startedAt'),r.requested_at,''),COALESCE(r.completed_at,''),
  COALESCE(messages.n,0),
  COALESCE(nodes.n,0),
@@ -34,6 +41,7 @@ const v2ThreadsQuery = `SELECT t.thread_id,t.title,COALESCE(p.title,''),
  FROM orchestration_v2_projection_threads t
  LEFT JOIN (SELECT thread_id,COUNT(*) n FROM orchestration_v2_projection_messages WHERE role IN ('user','assistant') GROUP BY thread_id) messages ON messages.thread_id=t.thread_id
  LEFT JOIN (SELECT thread_id,COUNT(*) n FROM orchestration_v2_projection_nodes WHERE kind='tool_call' GROUP BY thread_id) nodes ON nodes.thread_id=t.thread_id
+ LEFT JOIN claude_ids claude ON claude.thread_id=t.thread_id
  LEFT JOIN projection_projects p ON p.project_id=t.project_id
  LEFT JOIN orchestration_v2_projection_provider_threads pt ON pt.provider_thread_id=t.active_provider_thread_id
  LEFT JOIN orchestration_v2_projection_runs r ON r.rowid=(
@@ -42,9 +50,10 @@ const v2ThreadsQuery = `SELECT t.thread_id,t.title,COALESCE(p.title,''),
  SELECT rowid FROM orchestration_v2_projection_provider_turns WHERE provider_thread_id=t.active_provider_thread_id ORDER BY ordinal DESC,rowid DESC LIMIT 1)
  WHERE t.deleted_at IS NULL ORDER BY t.thread_id`
 
-const v2IdentityQuery = `SELECT COALESCE(json_extract(pt.payload_json,'$.nativeThreadRef.nativeId'),''),COALESCE(pt.driver,t.default_provider)
+const v2IdentityQuery = `WITH claude_ids AS (` + v2ClaudeIdentities + `) SELECT COALESCE(json_extract(pt.payload_json,'$.nativeThreadRef.nativeId'),''),COALESCE(pt.driver,t.default_provider),COALESCE(claude.ids,'[]')
  FROM orchestration_v2_projection_threads t
  LEFT JOIN orchestration_v2_projection_provider_threads pt ON pt.provider_thread_id=t.active_provider_thread_id
+ LEFT JOIN claude_ids claude ON claude.thread_id=t.thread_id
  WHERE t.thread_id=? AND t.deleted_at IS NULL`
 
 func (c *Collector) readV2Threads(ctx context.Context, tx *sql.Tx) ([]sessions.Summary, error) {
@@ -56,9 +65,12 @@ func (c *Collector) readV2Threads(ctx context.Context, tx *sql.Tx) ([]sessions.S
 	var out []sessions.Summary
 	for rows.Next() {
 		var row sessions.Summary
-		var id, created, updated, archived, model, started, completed, usage string
+		var id, created, updated, archived, model, started, completed, usage, claudeIDs string
 		if err := rows.Scan(&id, &row.Name, &row.Project, &row.Cwd, &created, &updated, &archived,
-			&model, &row.Provider, &row.ProviderThreadID, &started, &completed, &row.MessageCount, &row.ToolCallCount, &usage); err != nil {
+			&model, &row.Provider, &row.ProviderThreadID, &claudeIDs, &started, &completed, &row.MessageCount, &row.ToolCallCount, &usage); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal([]byte(claudeIDs), &row.ClaudeSessionIDs); err != nil {
 			return nil, err
 		}
 		var selection struct {
