@@ -96,8 +96,9 @@ the same home directory or environment override as the signed-in account.
 
 The collector supports five-hour, weekly, model-specific weekly and OAuth-app
 windows, Routines weekly usage (including the `seven_day_cowork` alias), and
-model-scoped `limits` entries. Unscoped `limits` session and weekly entries are
-used only when the matching `five_hour` or `seven_day` window is absent. Missing or
+model-scoped `limits` entries (any display group). Structured `limits` session
+and weekly entries are preferred; `five_hour` and `seven_day` are fallbacks.
+Readings above 100% show as 100% while forecasts use the raw value. Missing or
 invalid values remain unavailable, while valid sibling windows still report.
 After a rate limit (HTTP 429) each agent waits for `Retry-After`, or five
 minutes when absent, capped at one hour, before asking again. Structured

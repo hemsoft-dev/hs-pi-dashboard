@@ -53,16 +53,26 @@ func TestClaudeRoutinesAliasesAndLimitFallbacks(t *testing.T) {
 	if err != nil || labels(g) != "5h=12,Weekly=9,Fable weekly=5" || g[0].WindowSeconds != 18000 || g[0].ResetAt.IsZero() {
 		t.Fatalf("limits-only=%s err=%v", labels(g), err)
 	}
-	// Root windows win when both shapes are present, so nothing is reported twice.
+	// Structured entries win when both shapes are present, so nothing is
+	// reported twice; root windows remain the fallback for unusable entries.
 	g, err = parseClaudeWindows([]byte(`{"five_hour":{"utilization":40},"seven_day":{"utilization":25},"limits":[{"kind":"session","group":"session","percent":11},{"kind":"weekly_all","group":"weekly","percent":9}]}`), now)
-	if err != nil || labels(g) != "5h=40,Weekly=25" {
+	if err != nil || labels(g) != "5h=11,Weekly=9" {
 		t.Fatalf("both shapes=%s err=%v", labels(g), err)
+	}
+	g, err = parseClaudeWindows([]byte(`{"five_hour":{"utilization":40},"seven_day":{"utilization":25},"limits":[{"kind":"session","percent":null},{"kind":"weekly_all","percent":"9"}]}`), now)
+	if err != nil || labels(g) != "5h=40,Weekly=25" {
+		t.Fatalf("unusable structured=%s err=%v", labels(g), err)
+	}
+	// Scoped limits count whatever their display group.
+	g, err = parseClaudeWindows([]byte(`{"limits":[{"kind":"weekly_scoped","group":"model","percent":17.2,"scope":{"model":{"display_name":"Fable"}}}]}`), now)
+	if err != nil || labels(g) != "Fable weekly=17.2" {
+		t.Fatalf("model group=%s err=%v", labels(g), err)
 	}
 }
 
 func TestClaudePartialAndInvalidWindows(t *testing.T) {
 	now := time.Now()
-	for _, body := range []string{`null`, `false`, `[]`, `{`, `{}`, `{"extra_usage":{"utilization":0}}`, `{"five_hour":{"utilization":"50"}}`, `{"five_hour":{"utilization":true}}`, `{"five_hour":{"utilization":null}}`, `{"five_hour":{"utilization":-1}}`, `{"five_hour":{"utilization":101,"resets_at":"invalid"}}`} {
+	for _, body := range []string{`null`, `false`, `[]`, `{`, `{}`, `{"extra_usage":{"utilization":0}}`, `{"five_hour":{"utilization":"50"}}`, `{"five_hour":{"utilization":true}}`, `{"five_hour":{"utilization":null}}`, `{"five_hour":{"utilization":-1}}`} {
 		if g, e := parseClaudeWindows([]byte(body), now); e == nil || len(g) != 0 {
 			t.Errorf("accepted %s: %+v %v", body, g, e)
 		}
@@ -70,6 +80,15 @@ func TestClaudePartialAndInvalidWindows(t *testing.T) {
 	g, e := parseClaudeWindows([]byte(`{"five_hour":[],"seven_day":{"utilization":12,"resets_at":false},"seven_day_sonnet":{"utilization":null,"resets_at":"2099-01-01T00:00:00Z"}}`), now)
 	if e != nil || len(g) != 2 || g[0].Label != "Weekly" || *g[0].UsedPercent != 12 || g[0].ProjectedEnd != nil || g[1].UsedPercent != nil {
 		t.Fatalf("partial=%+v %v", g, e)
+	}
+	// Over-limit readings display as 100% and still forecast from the raw value.
+	g, e = parseClaudeWindows([]byte(`{"five_hour":{"utilization":101,"resets_at":"invalid"}}`), now)
+	if e != nil || len(g) != 1 || *g[0].UsedPercent != 100 || g[0].ProjectedEnd != nil {
+		t.Fatalf("over limit without reset=%+v %v", g, e)
+	}
+	g, e = parseClaudeWindows(fmt.Appendf(nil, `{"seven_day":{"utilization":120,"resets_at":%q}}`, now.Add(3*24*time.Hour).Format(time.RFC3339)), now)
+	if e != nil || len(g) != 1 || *g[0].UsedPercent != 100 || g[0].ProjectedEnd == nil || *g[0].ProjectedEnd <= 120 {
+		t.Fatalf("over limit with reset=%+v %v", g, e)
 	}
 	for _, reset := range []time.Time{now.Add(time.Hour * 6), now.Add(-time.Hour), now.Add(time.Hour*5 - time.Second*60)} {
 		g, e := parseClaudeWindows(fmt.Appendf(nil, `{"five_hour":{"utilization":50,"resets_at":%q}}`, reset.Format(time.RFC3339)), now)

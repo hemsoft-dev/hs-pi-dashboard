@@ -169,9 +169,12 @@ func parseClaudeWindows(body []byte, now time.Time) ([]Gauge, error) {
 			return Gauge{}, false
 		}
 		g := Gauge{Label: label, WindowSeconds: duration}
+		// Over-limit readings are real: display is clamped to 100% while the
+		// projection keeps the raw value, as the other collectors do.
 		var used float64
-		if data := w[percentKey]; len(data) > 0 && string(data) != "null" && json.Unmarshal(data, &used) == nil && !math.IsInf(used, 0) && !math.IsNaN(used) && used >= 0 && used <= 100 {
-			g.UsedPercent = &used
+		if data := w[percentKey]; len(data) > 0 && string(data) != "null" && json.Unmarshal(data, &used) == nil && !math.IsInf(used, 0) && !math.IsNaN(used) && used >= 0 {
+			shown := clamp(used, 0, 100)
+			g.UsedPercent = &shown
 		}
 		var reset string
 		if json.Unmarshal(w["resets_at"], &reset) == nil {
@@ -214,7 +217,9 @@ func parseClaudeWindows(body []byte, now time.Time) ([]Gauge, error) {
 	var scopedModels []string
 	seen := map[string]bool{}
 	for _, entry := range limits {
-		if entry.Kind != "weekly_scoped" || entry.Group != "weekly" {
+		// Classify by kind and model scope; observed payloads use both
+		// "weekly" and "model" as the display group.
+		if entry.Kind != "weekly_scoped" {
 			continue
 		}
 		name := strings.TrimSpace(entry.Scope.Model.Name)
@@ -243,49 +248,44 @@ func parseClaudeWindows(body []byte, now time.Time) ([]Gauge, error) {
 		return false
 	}
 	var gauges []Gauge
-	// Root windows come first. Unscoped limit entries stand in for the
-	// session and weekly windows only when the root window is unusable, so
-	// responses carrying both shapes never report the same quota twice.
-	limitFallback := func(label string, duration float64, kind, group string) {
+	// Structured session and weekly entries are canonical; the root
+	// five_hour/seven_day windows are compatibility fallbacks, so responses
+	// carrying both shapes never report the same quota twice.
+	structured := func(label string, duration float64, kind string) bool {
 		for _, entry := range limits {
-			if entry.Kind != kind || entry.Group != group {
+			if entry.Kind != kind || entry.Scope.Model.Name != "" || entry.Scope.Model.ID != "" {
 				continue
 			}
 			if g, ok := parseWindow(label, duration, entry.raw, "percent"); ok {
 				gauges = append(gauges, g)
-				return
+				return true
 			}
 		}
+		return false
 	}
 	for _, spec := range []struct {
-		keys          []string
-		label         string
-		seconds       float64
-		fallbackKind  string
-		fallbackGroup string
-		model         string
+		keys    []string
+		label   string
+		seconds float64
+		kind    string // structured limits entry preferred over the root keys
+		model   string // legacy model window superseded by a scoped entry
 	}{
-		{[]string{"five_hour"}, "5h", 5 * 3600, "session", "session", ""},
-		{[]string{"seven_day"}, "Weekly", 7 * 86400, "weekly_all", "weekly", ""},
-		{[]string{"seven_day_sonnet"}, "Sonnet weekly", 7 * 86400, "", "", "sonnet"},
-		{[]string{"seven_day_opus"}, "Opus weekly", 7 * 86400, "", "", "opus"},
-		{[]string{"seven_day_oauth_apps"}, "OAuth apps weekly", 7 * 86400, "", "", ""},
+		{[]string{"five_hour"}, "5h", 5 * 3600, "session", ""},
+		{[]string{"seven_day"}, "Weekly", 7 * 86400, "weekly_all", ""},
+		{[]string{"seven_day_sonnet"}, "Sonnet weekly", 7 * 86400, "", "sonnet"},
+		{[]string{"seven_day_opus"}, "Opus weekly", 7 * 86400, "", "opus"},
+		{[]string{"seven_day_oauth_apps"}, "OAuth apps weekly", 7 * 86400, "", ""},
 		// Accounts report Routines under several names, including the Cowork alias.
-		{[]string{"seven_day_routines", "seven_day_claude_routines", "claude_routines", "routines", "routine", "seven_day_cowork", "cowork"}, "Routines weekly", 7 * 86400, "", "", ""},
+		{[]string{"seven_day_routines", "seven_day_claude_routines", "claude_routines", "routines", "routine", "seven_day_cowork", "cowork"}, "Routines weekly", 7 * 86400, "", ""},
 	} {
-		if coveredByScoped(spec.model) {
+		if coveredByScoped(spec.model) || (spec.kind != "" && structured(spec.label, spec.seconds, spec.kind)) {
 			continue
 		}
-		found := false
 		for _, key := range spec.keys {
-			var g Gauge
-			if g, found = parseWindow(spec.label, spec.seconds, root[key], "utilization"); found {
+			if g, ok := parseWindow(spec.label, spec.seconds, root[key], "utilization"); ok {
 				gauges = append(gauges, g)
 				break
 			}
-		}
-		if !found && spec.fallbackKind != "" {
-			limitFallback(spec.label, spec.seconds, spec.fallbackKind, spec.fallbackGroup)
 		}
 	}
 	gauges = append(gauges, scoped...)
