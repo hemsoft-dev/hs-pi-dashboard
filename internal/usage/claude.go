@@ -51,8 +51,9 @@ func (g *claudeRateGate) blockedUntil(token string, now time.Time) time.Time {
 func (g *claudeRateGate) block(token, retryAfter string, now time.Time) time.Time {
 	wait := claudeDefaultCooldown
 	// Zero seconds and already-elapsed dates permit an immediate retry.
-	if seconds, err := strconv.Atoi(strings.TrimSpace(retryAfter)); err == nil && seconds >= 0 {
-		wait = time.Duration(seconds) * time.Second
+	// Cap the seconds before converting so huge values cannot overflow Duration.
+	if seconds, err := strconv.ParseInt(strings.TrimSpace(retryAfter), 10, 64); err == nil && seconds >= 0 {
+		wait = time.Duration(min(seconds, int64(claudeMaxCooldown/time.Second))) * time.Second
 	} else if at, err := http.ParseTime(retryAfter); err == nil {
 		wait = max(at.Sub(now), 0)
 	}
@@ -219,7 +220,7 @@ func parseClaudeWindows(body []byte, now time.Time) ([]Gauge, error) {
 	// model, so one quota never shows twice.
 	var scoped []Gauge
 	var scopedModels []string
-	seen := map[string]bool{}
+	seen := map[string]int{} // model id -> index in scoped
 	for _, entry := range limits {
 		// Classify by kind and model scope; observed payloads use both
 		// "weekly" and "model" as the display group.
@@ -234,14 +235,21 @@ func parseClaudeWindows(body []byte, now time.Time) ([]Gauge, error) {
 		if id == "" {
 			id = name
 		}
-		if seen[id] {
+		g, ok := parseWindow(name+" weekly", 7*86400, entry.raw, "percent")
+		if !ok {
 			continue
 		}
-		if g, ok := parseWindow(name+" weekly", 7*86400, entry.raw, "percent"); ok {
-			seen[id] = true
-			scoped = append(scoped, g)
-			scopedModels = append(scopedModels, strings.ToLower(name+" "+id))
+		// Repeated entries for one model: a measured entry replaces a
+		// reset-only one, otherwise the first wins.
+		if i, dup := seen[id]; dup {
+			if scoped[i].UsedPercent == nil && g.UsedPercent != nil {
+				scoped[i] = g
+			}
+			continue
 		}
+		seen[id] = len(scoped)
+		scoped = append(scoped, g)
+		scopedModels = append(scopedModels, strings.ToLower(name+" "+id))
 	}
 	coveredByScoped := func(model string) bool {
 		for _, m := range scopedModels {

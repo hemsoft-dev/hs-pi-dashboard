@@ -72,6 +72,12 @@ func TestClaudeRoutinesAliasesAndLimitFallbacks(t *testing.T) {
 	if err != nil || len(g) != 1 || g[0].UsedPercent != nil || g[0].ResetAt.IsZero() {
 		t.Fatalf("reset-only alone=%+v err=%v", g, err)
 	}
+	// A measured duplicate scoped entry replaces an earlier reset-only one,
+	// and still supersedes the legacy model window.
+	g, err = parseClaudeWindows([]byte(`{"seven_day_sonnet":{"utilization":30},"limits":[{"kind":"weekly_scoped","percent":null,"resets_at":"2026-10-22T10:00:00Z","scope":{"model":{"display_name":"Sonnet"}}},{"kind":"weekly_scoped","percent":31,"scope":{"model":{"display_name":"Sonnet"}}},{"kind":"weekly_scoped","percent":40,"scope":{"model":{"display_name":"Sonnet"}}}]}`), now)
+	if err != nil || labels(g) != "Sonnet weekly=31" {
+		t.Fatalf("duplicate scoped=%s err=%v", labels(g), err)
+	}
 	// Scoped limits count whatever their display group.
 	g, err = parseClaudeWindows([]byte(`{"limits":[{"kind":"weekly_scoped","group":"model","percent":17.2,"scope":{"model":{"display_name":"Fable"}}}]}`), now)
 	if err != nil || labels(g) != "Fable weekly=17.2" {
@@ -243,6 +249,8 @@ func TestClaudeRateLimitCooldown(t *testing.T) {
 		{"", claudeDefaultCooldown},
 		{"soon", claudeDefaultCooldown},
 		{"86400", claudeMaxCooldown},
+		{"9223372037", claudeMaxCooldown},
+		{"99999999999999999999", claudeDefaultCooldown},
 	} {
 		g.clear("t")
 		if until := g.block("t", tc.header, now); until.Sub(now) != tc.want {
