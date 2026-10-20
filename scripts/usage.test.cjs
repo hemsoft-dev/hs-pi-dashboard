@@ -39,6 +39,10 @@ test('window labels become readable words', () => {
   assert.equal(r.windowLabel('Monthly'), 'Monthly');
   assert.equal(r.windowLabel('Gemini W'), 'Gemini · weekly');
   assert.equal(r.windowLabel('3P 5h'), 'Third-party · 5-hour');
+  // Claude collector labels carry no separator of their own.
+  assert.equal(r.windowLabel('Sonnet weekly'), 'Sonnet · weekly');
+  assert.equal(r.windowLabel('OAuth apps weekly'), 'OAuth apps · weekly');
+  assert.equal(r.windowLabel('Claude Sonnet 4.5 weekly'), 'Claude Sonnet 4.5 · weekly');
   assert.equal(r.windowLabel('Window'), 'Window');
   assert.equal(r.windowLabel(''), 'Window');
 });

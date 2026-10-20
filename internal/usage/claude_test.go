@@ -29,7 +29,7 @@ func TestClaudeWindows(t *testing.T) {
 	if *gauges[2].UsedPercent != 0 || gauges[2].ProjectedEnd != nil || !gauges[2].ResetAt.IsZero() {
 		t.Fatalf("zero without reset=%+v", gauges[2])
 	}
-	if gauges[3].Label != "Demo model · weekly" || *gauges[3].UsedPercent != 55 {
+	if gauges[3].Label != "Demo model weekly" || *gauges[3].UsedPercent != 55 {
 		t.Fatalf("scoped=%+v", gauges[3])
 	}
 }
@@ -45,12 +45,12 @@ func TestClaudeRoutinesAliasesAndLimitFallbacks(t *testing.T) {
 	}
 	// The Cowork alias is used when the canonical Routines key is absent or unusable.
 	g, err := parseClaudeWindows([]byte(`{"seven_day_routines":[],"seven_day_cowork":{"utilization":7}}`), now)
-	if err != nil || labels(g) != "Routines · weekly=7" {
+	if err != nil || labels(g) != "Routines weekly=7" {
 		t.Fatalf("cowork=%s err=%v", labels(g), err)
 	}
 	// Limits-only responses still report the session and weekly windows.
 	g, err = parseClaudeWindows([]byte(`{"limits":[null,{"kind":"session","group":"session","percent":"11"},{"kind":"session","group":"session","percent":12,"resets_at":"2026-10-19T12:00:00Z","scope":null},{"kind":"weekly_all","group":"weekly","percent":9,"scope":null},{"kind":"weekly_scoped","group":"weekly","percent":5,"scope":{"model":{"display_name":"Fable"}}}]}`), now)
-	if err != nil || labels(g) != "5h=12,Weekly=9,Fable · weekly=5" || g[0].WindowSeconds != 18000 || g[0].ResetAt.IsZero() {
+	if err != nil || labels(g) != "5h=12,Weekly=9,Fable weekly=5" || g[0].WindowSeconds != 18000 || g[0].ResetAt.IsZero() {
 		t.Fatalf("limits-only=%s err=%v", labels(g), err)
 	}
 	// Root windows win when both shapes are present, so nothing is reported twice.
@@ -142,6 +142,7 @@ func TestClaudeFetchErrorsAndHeaders(t *testing.T) {
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "synthetic-secret")
 	for _, status := range []int{200, 401, 403, 429, 500, 0} {
 		calls = 0
+		f.claudeGate.clear("synthetic-secret")
 		f.Client.Transport = claudeTransport(func(r *http.Request) (*http.Response, error) {
 			calls++
 			if r.Method != "GET" || r.URL.String() != claudeUsageURL || r.Header.Get("Authorization") != "Bearer synthetic-secret" || r.Header.Get("anthropic-beta") != "oauth-2025-04-20" || r.Header.Get("User-Agent") != claudeUserAgent || r.Header.Get("Content-Type") != "application/json" {
@@ -173,6 +174,69 @@ func TestClaudeFetchErrorsAndHeaders(t *testing.T) {
 	cancel()
 	if c := f.claude(ctx); c.Error == "" {
 		t.Fatal("canceled request succeeded")
+	}
+}
+
+func TestClaudeRateLimitCooldown(t *testing.T) {
+	home := claudeHome(t)
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "synthetic-secret")
+	calls, status, retryAfter := 0, 429, "120"
+	f := &Fetcher{Home: home, Client: &http.Client{Transport: claudeTransport(func(r *http.Request) (*http.Response, error) {
+		calls++
+		h := make(http.Header)
+		h.Set("Retry-After", retryAfter)
+		return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(`{"seven_day":{"utilization":50}}`)), Header: h}, nil
+	})}}
+	if c := f.claude(context.Background()); calls != 1 || c.Error != "Claude usage rate limited; next attempt in 2m" {
+		t.Fatalf("429=%+v calls=%d", c, calls)
+	}
+	// Later refreshes during the cooldown send nothing.
+	status = 200
+	if c := f.claude(context.Background()); calls != 1 || !strings.Contains(c.Error, "rate limited") || len(c.Gauges) != 0 {
+		t.Fatalf("cooldown=%+v calls=%d", c, calls)
+	}
+	// Once the cooldown expires the next refresh succeeds and clears the gate.
+	for key := range f.claudeGate.until {
+		f.claudeGate.until[key] = time.Now().Add(-time.Second)
+	}
+	if c := f.claude(context.Background()); calls != 2 || c.Error != "" || len(c.Gauges) != 1 || len(f.claudeGate.until) != 0 {
+		t.Fatalf("recovered=%+v calls=%d", c, calls)
+	}
+	// Retry-After as an HTTP date, missing, or excessive.
+	now := time.Date(2026, 10, 19, 10, 0, 0, 0, time.UTC)
+	var g claudeRateGate
+	for _, tc := range []struct {
+		header string
+		want   time.Duration
+	}{
+		{now.Add(10 * time.Minute).Format(http.TimeFormat), 10 * time.Minute},
+		{"", claudeDefaultCooldown},
+		{"soon", claudeDefaultCooldown},
+		{"86400", claudeMaxCooldown},
+	} {
+		g.clear("t")
+		if until := g.block("t", tc.header, now); until.Sub(now) != tc.want {
+			t.Errorf("Retry-After %q blocked for %v, want %v", tc.header, until.Sub(now), tc.want)
+		}
+	}
+	// A shorter later Retry-After never shortens an existing cooldown.
+	g.clear("t")
+	g.block("t", "600", now)
+	if until := g.block("t", "60", now); until.Sub(now) != 10*time.Minute {
+		t.Errorf("cooldown shortened to %v", until.Sub(now))
+	}
+}
+
+func TestClaudeScopedLimitsReplaceLegacyModelWindows(t *testing.T) {
+	now := time.Date(2026, 10, 19, 10, 0, 0, 0, time.UTC)
+	body := `{"seven_day":{"utilization":25},"seven_day_sonnet":{"utilization":30},"seven_day_opus":{"utilization":10},"limits":[{"kind":"weekly_scoped","group":"weekly","percent":31,"scope":{"model":{"id":"claude-sonnet-4-5","display_name":"Sonnet"}}},{"kind":"weekly_scoped","group":"weekly","percent":5,"scope":{"model":{"display_name":"Fable"}}}]}`
+	g, err := parseClaudeWindows([]byte(body), now)
+	var got []string
+	for _, x := range g {
+		got = append(got, fmt.Sprintf("%s=%v", x.Label, *x.UsedPercent))
+	}
+	if err != nil || strings.Join(got, ",") != "Weekly=25,Opus weekly=10,Sonnet weekly=31,Fable weekly=5" {
+		t.Fatalf("gauges=%v err=%v", got, err)
 	}
 }
 

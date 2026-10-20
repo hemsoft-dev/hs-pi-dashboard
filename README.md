@@ -99,7 +99,10 @@ windows, Routines weekly usage (including the `seven_day_cowork` alias), and
 model-scoped `limits` entries. Unscoped `limits` session and weekly entries are
 used only when the matching `five_hour` or `seven_day` window is absent. Missing or
 invalid values remain unavailable, while valid sibling windows still report.
-Forecasts require a valid reset within the known window duration and at least
+After a rate limit (HTTP 429) each agent waits for `Retry-After`, or five
+minutes when absent, capped at one hour, before asking again. Structured
+model-scoped limits replace the legacy Sonnet/Opus weekly windows for the same
+model. Forecasts require a valid reset within the known window duration and at least
 two minutes elapsed. Extra-usage spend and session token totals are excluded.
 The schema and authentication headers were checked against
 [CodexBar's OAuth fetcher](https://github.com/steipete/CodexBar/blob/59a7d46ac61338786e5d32d8324a3e414525e601/Sources/CodexBarCore/Providers/Claude/ClaudeOAuth/ClaudeOAuthUsageFetcher.swift)

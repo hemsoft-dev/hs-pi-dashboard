@@ -79,6 +79,8 @@ const (
 type Fetcher struct {
 	Client *http.Client
 	Home   string // defaults to the current user's home
+
+	claudeGate claudeRateGate
 }
 
 // New returns a fetcher with defaults.
