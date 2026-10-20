@@ -6,12 +6,13 @@ const path = require('node:path');
 
 const H = 3600000;
 
-function renderer() {
+function renderer(storage = new Map()) {
   const html = readFileSync(path.join(__dirname, '../internal/web/index.html'), 'utf8');
-  const storage = new Map();
   const nodes = {
     'usage-body': { innerHTML: '', contains: () => false, querySelectorAll: () => [], querySelector: () => null },
     'usage-summary': { innerHTML: '', textContent: '' },
+    'usage-provider-options': { innerHTML: '', dataset: {}, querySelectorAll: () => [] },
+    'usage-provider-note': { textContent: '' },
   };
   const r = vm.createContext({
     localStorage: { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) },
@@ -20,8 +21,8 @@ function renderer() {
     lastFleet: null,
   });
   vm.runInContext(html.slice(html.indexOf('function rel('), html.indexOf('let lastFleet = null;')), r);
-  vm.runInContext(html.slice(html.indexOf('function cardCollapsed('), html.indexOf('const USAGE_TOGGLE_KEY')), r);
-  return { r, body: nodes['usage-body'], summary: nodes['usage-summary'], storage };
+  vm.runInContext(html.slice(html.indexOf('const USAGE_PROVIDERS_KEY'), html.indexOf('const USAGE_TOGGLE_KEY')), r);
+  return { r, body: nodes['usage-body'], summary: nodes['usage-summary'], options: nodes['usage-provider-options'], storage };
 }
 function gauge(usedPercent, projectedEnd = null, extra = {}) {
   return { label: 'Weekly', usedPercent, projectedEnd, resetAt: new Date(Date.now() + 10 * H).toISOString(), ...extra };
@@ -38,6 +39,10 @@ test('window labels become readable words', () => {
   assert.equal(r.windowLabel('Monthly'), 'Monthly');
   assert.equal(r.windowLabel('Gemini W'), 'Gemini · weekly');
   assert.equal(r.windowLabel('3P 5h'), 'Third-party · 5-hour');
+  // Claude collector labels carry no separator of their own.
+  assert.equal(r.windowLabel('Sonnet weekly'), 'Sonnet · weekly');
+  assert.equal(r.windowLabel('OAuth apps weekly'), 'OAuth apps · weekly');
+  assert.equal(r.windowLabel('Claude Sonnet 4.5 weekly'), 'Claude Sonnet 4.5 · weekly');
   assert.equal(r.windowLabel('Window'), 'Window');
   assert.equal(r.windowLabel(''), 'Window');
 });
@@ -258,4 +263,79 @@ test('a refresh failure is stamped with the failed reading, not the oldest healt
     card({ key: 'antigravity', label: 'Antigravity', gauges: [gauge(10, 30)], fetchedAt: minuteOld, error: 'timeout' }),
   ] } }] });
   assert.match(summary.innerHTML, /<span class="ufresh cached">refresh failed · cached 60s ago<\/span>/);
+});
+
+test('provider choices remove disabled readings, failures and freshness from all summaries', () => {
+  const { r, body, summary, options, storage } = renderer();
+  const fleet = { machines: [{ usage: { cards: [
+    card({ key: 'antigravity', label: 'Antigravity', error: 'timeout', fetchedAt: new Date(Date.now() - 60 * 60000).toISOString(), gauges: [gauge(100)] }),
+    card({ key: 'claude', label: 'Claude', gauges: [gauge(20, 40)] }),
+    card({ gauges: [gauge(30, 50)] }),
+    card({ key: 'moonshot', label: 'Moonshot AI', kind: 'balance', gauges: undefined, balanceUsd: 5 }),
+  ] } }, { usage: { cards: [card({ key: 'claude', label: 'Claude', gauges: [gauge(20, 40)] })] } }] };
+  r.lastFleet = fleet;
+  r.renderUsage(fleet);
+  assert.match(body.innerHTML, /Antigravity/);
+  assert.doesNotMatch(body.innerHTML, />Claude</);
+  assert.match(options.innerHTML, /data-usage-provider="claude"><span>Claude/);
+  r.setUsageProvider('antigravity', false);
+  r.setUsageProvider('claude', true);
+  assert.doesNotMatch(body.innerHTML, /Antigravity|timeout|ufail/);
+  assert.equal((body.innerHTML.match(/class="ucard-label">Claude/g) || []).length, 1);
+  assert.match(summary.innerHTML, /all plans on pace.*updated now/);
+  assert.doesNotMatch(summary.innerHTML, /cached|Antigravity|limit reached/);
+  assert.match(body.innerHTML, /Moonshot AI.*\$5.00/);
+  const reloaded = renderer(storage);
+  reloaded.r.renderUsage(fleet);
+  assert.doesNotMatch(reloaded.body.innerHTML, /Antigravity/);
+  assert.match(reloaded.body.innerHTML, />Claude</);
+  assert.match(reloaded.options.innerHTML, /data-usage-provider="claude" checked/);
+  r.setUsageProvider('antigravity', true);
+  assert.match(body.innerHTML, /Antigravity/);
+  r.setUsageProvider('moonshot', false);
+  assert.doesNotMatch(body.innerHTML, /Moonshot AI|Prepaid balances/);
+});
+
+test('a switched-on provider that no agent reports is listed as not reporting', () => {
+  const { r, body, summary } = renderer();
+  const fleet = { machines: [{ usage: { cards: [card({ gauges: [gauge(30, 50)] })] } }] };
+  r.lastFleet = fleet;
+  r.renderUsage(fleet);
+  assert.doesNotMatch(body.innerHTML, /ufail|Claude/);
+  r.setUsageProvider('claude', true);
+  assert.match(body.innerHTML, /Not reporting:<\/b> Claude.*<b>Claude<\/b> no agent reports it yet; update agents to enable it/);
+  assert.match(body.innerHTML, /class="ucard-label">Codex/);
+  assert.match(summary.innerHTML, /all plans on pace.*updated now/);
+  r.setUsageProvider('claude', false);
+  assert.doesNotMatch(body.innerHTML, /ufail|Claude/);
+});
+
+test('all-disabled state survives reload and keeps every choice available without reporters', () => {
+  const { r, storage, body, options, summary } = renderer();
+  for (const provider of r.usageProviderCatalog({})) r.setUsageProvider(provider.key, false);
+  r.renderUsage({ machines: [] });
+  assert.match(body.innerHTML, /No providers selected.*Choose providers/);
+  assert.equal(summary.textContent, 'no providers selected');
+  assert.equal((options.innerHTML.match(/type="checkbox"/g) || []).length, 6);
+  assert.doesNotMatch(options.innerHTML, / checked/);
+  const reload = renderer(storage);
+  reload.r.renderUsage({});
+  assert.match(reload.body.innerHTML, /No providers selected/);
+  reload.r.setUsageProvider('claude', true);
+  reload.r.renderUsage({ machines: [{ usage: { cards: [card()] } }] });
+  assert.match(reload.body.innerHTML, /Selected providers have not reported/);
+});
+
+test('malformed preferences use defaults and storage failure still permits changes for this page', () => {
+  for (const value of ['not-json', 'null', 'false', '[]', '2', '{"codex":"false","claude":1}']) {
+    const { r } = renderer(new Map([['hs-pi-dashboard:usage-providers:v1', value]]));
+    assert.equal(r.usageProviderEnabled('codex'), true);
+    assert.equal(r.usageProviderEnabled('claude'), false);
+  }
+  const { r, body, options } = renderer();
+  r.localStorage.setItem = () => { throw new Error('quota exceeded'); };
+  r.setUsageProvider('claude', true);
+  r.renderUsage({ machines: [{ usage: { cards: [card({ key: 'claude', label: 'Claude' })] } }] });
+  assert.match(body.innerHTML, />Claude</);
+  assert.match(options.innerHTML, /data-usage-provider="claude" checked/);
 });

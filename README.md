@@ -68,6 +68,48 @@ minutes or when a failed refresh left its last successful reading in place.
 Missing values read "no reading" rather than zero. Section and provider
 collapse preferences persist, and the 5-second refresh keeps keyboard focus.
 
+Use **Choose providers** below the section heading to show or hide each quota
+or balance provider. Changes apply immediately to rows, warnings and the
+collapsed summary. They are saved in this browser for this dashboard address;
+other browsers and devices have their own choices. All five existing providers
+start enabled and Claude starts disabled. To use Claude instead of Antigravity,
+uncheck Antigravity and check Claude. The selector remains available when the
+section is collapsed, agents are offline, or every provider is disabled.
+These are display preferences; agents keep refreshing their cached readings.
+A provider you switch on that no agent reports yet, such as Claude with older
+agents, is listed under **Not reporting** until the agents are updated.
+
+Claude reports subscription quotas from the read-only
+`GET https://api.anthropic.com/api/oauth/usage` endpoint with the
+`anthropic-beta: oauth-2025-04-20` header and a Claude Code `User-Agent` (some
+valid sessions are refused otherwise), using an existing subscription session.
+Credential precedence on each agent is `CLAUDE_CODE_OAUTH_TOKEN`, Claude Code's
+`~/.claude/.credentials.json` (`claudeAiOauth.accessToken`), then Pi's
+`~/.pi/agent/auth.json` (`anthropic.access`). `CLAUDE_CONFIG_DIR` replaces the
+Claude Code directory and disables fallback to Pi, so a custom profile cannot
+silently select another account. Tokens need usage/profile access; API keys and
+inference-only setup tokens do not supply subscription usage. Sign in through
+Claude Code or Pi as usual. The dashboard never starts login, reads the macOS
+Keychain, renews tokens or writes credentials. An expired or inaccessible session
+shows a setup/error message; renew it in its owning app. Service processes need
+the same home directory or environment override as the signed-in account.
+
+The collector supports five-hour, weekly, model-specific weekly and OAuth-app
+windows, Routines weekly usage (including the `seven_day_cowork` alias), and
+model-scoped `limits` entries (any display group). Structured `limits` session
+and weekly entries are preferred; `five_hour` and `seven_day` are fallbacks.
+Readings above 100% show as 100% while forecasts use the raw value. Missing or
+invalid values remain unavailable, while valid sibling windows still report.
+After a rate limit (HTTP 429) each agent waits for `Retry-After`, or five
+minutes when absent, capped at one hour, before asking again. Structured
+model-scoped limits replace the legacy Sonnet/Opus weekly windows for the same
+model. Forecasts require a valid reset within the known window duration and at least
+two minutes elapsed. Extra-usage spend and session token totals are excluded.
+The schema and authentication headers were checked against
+[CodexBar's OAuth fetcher](https://github.com/steipete/CodexBar/blob/59a7d46ac61338786e5d32d8324a3e414525e601/Sources/CodexBarCore/Providers/Claude/ClaudeOAuth/ClaudeOAuthUsageFetcher.swift)
+and its
+[scoped weekly parser](https://github.com/steipete/CodexBar/blob/59a7d46ac61338786e5d32d8324a3e414525e601/Sources/CodexBarCore/Providers/Claude/ClaudeWeb/ClaudeWebExtraRateWindowParser.swift).
+
 The board is plain HTML and CSS embedded in the Go binary, with no chart
 library. `PRODUCT.md` and `DESIGN.md` record the product context and the
 gold-on-black design system for later UI work.

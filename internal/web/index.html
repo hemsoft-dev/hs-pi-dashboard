@@ -95,6 +95,16 @@
      the plan limit at 100%, so forecasts that cross the limit line up down the
      column. Ember marks only a forecast past the limit. */
   .usage-section { --ember: #ff7a4d; --ember-dim: #c2603f; --track: #1d1c18; --limit-at: 80%; }
+  .uproviders { margin: -4px 0 10px; font-size: 12px; }
+  .uproviders > summary { width: fit-content; padding: 6px 0; color: var(--gold-dim); cursor: pointer; }
+  .uproviders > summary:hover { color: var(--gold); }
+  .uproviders > summary:focus-visible, .uprovider input:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
+  .uproviders fieldset { border: 1px solid var(--card-border); border-radius: 4px; padding: 4px 14px 8px; margin: 6px 0; }
+  .uproviders legend { color: var(--text); padding: 0 6px; }
+  .uprovider-options { display: flex; flex-wrap: wrap; gap: 0 24px; }
+  .uprovider { display: inline-flex; align-items: center; gap: 8px; min-height: 42px; color: var(--text); cursor: pointer; }
+  .uprovider input { accent-color: var(--gold); width: 16px; height: 16px; }
+  .uprovider-note { color: var(--muted-light); margin: 4px 0 0; font-size: 11px; }
   #usage-toggle { flex-wrap: wrap; row-gap: 4px; }
   #usage-toggle .chev { width: 12px; height: 12px; flex: none; }
   .usage-summary { flex: 1 1 auto; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; margin-left: 10px;
@@ -326,6 +336,11 @@
     <svg class="chev" viewBox="0 0 12 12" aria-hidden="true" focusable="false"><path d="m2 4 4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.5"/></svg> Usage &amp; Balances
     <span class="usage-summary" id="usage-summary">loading usage…</span>
   </button></h2>
+  <details id="usage-providers" class="uproviders">
+    <summary>Choose providers</summary>
+    <fieldset><legend>Show in Usage &amp; Balances</legend><div id="usage-provider-options" class="uprovider-options"></div></fieldset>
+    <p id="usage-provider-note" class="uprovider-note" role="status">Saved in this browser. Applies to this section.</p>
+  </details>
   <div id="usage-body" class="usage-body"><p class="uempty">loading usage…</p></div>
 </section>
 <section class="pulse-section">
@@ -551,6 +566,7 @@ function headerStamp(source, cards) {
   return `<span class="ufresh">updated ${rel(oldest)}</span>`;
 }
 function failureText(card) {
+  if (card.absent) return "no agent reports it yet; update agents to enable it";
   if (card.kind !== "quota" && card.kind !== "balance") return "no usage source yet";
   const what = card.kind === "balance" ? "balance" : "usage";
   if (card.error) return `couldn't read ${what}`;
@@ -893,6 +909,51 @@ function snapshotActiveSessionCount(fleet) {
   return piSessions + hermesSessions;
 }
 
+const USAGE_PROVIDERS_KEY = "hs-pi-dashboard:usage-providers:v1";
+const USAGE_PROVIDERS = [
+  { key: "codex", label: "Codex" }, { key: "claude", label: "Claude" },
+  { key: "opencode-go", label: "OpenCode Go" }, { key: "antigravity", label: "Antigravity" },
+  { key: "opencode-zen", label: "OpenCode Zen" }, { key: "moonshot", label: "Moonshot AI" },
+];
+function loadUsageProviders() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(USAGE_PROVIDERS_KEY));
+    return saved && typeof saved === "object" && !Array.isArray(saved) ? saved : {};
+  } catch { return {}; }
+}
+let usageProviderPreferences = loadUsageProviders();
+function usageProviderEnabled(key) {
+  return Object.hasOwn(usageProviderPreferences, key) && typeof usageProviderPreferences[key] === "boolean"
+    ? usageProviderPreferences[key] : key !== "claude";
+}
+function usageProviderCatalog(fleet) {
+  const known = new Map(USAGE_PROVIDERS.map((p) => [p.key, p]));
+  for (const m of fleet.machines ?? []) for (const c of m.usage?.cards ?? []) {
+    if (c.key && !known.has(c.key)) known.set(c.key, { key: c.key, label: c.label || c.key });
+  }
+  return [...known.values()];
+}
+function setUsageProvider(key, enabled) {
+  usageProviderPreferences = { ...usageProviderPreferences, [key]: enabled };
+  try {
+    localStorage.setItem(USAGE_PROVIDERS_KEY, JSON.stringify(usageProviderPreferences));
+    document.getElementById("usage-provider-note").textContent = "Saved in this browser. Applies to this section.";
+  } catch {
+    document.getElementById("usage-provider-note").textContent = "Could not save this choice. It applies until you reload.";
+  }
+  if (lastFleet) renderUsage(lastFleet);
+}
+function renderUsageProviders(catalog) {
+  const options = document.getElementById("usage-provider-options");
+  // Keep the actual checkbox nodes across polls, including their keyboard focus.
+  const signature = JSON.stringify(catalog);
+  if (options.dataset.signature === signature) return;
+  const focused = document.activeElement?.dataset?.usageProvider;
+  options.innerHTML = catalog.map((p) => `<label class="uprovider"><input type="checkbox" data-usage-provider="${esc(p.key)}"${usageProviderEnabled(p.key) ? " checked" : ""}><span>${esc(p.label)}</span></label>`).join("");
+  options.dataset.signature = signature;
+  if (focused) [...options.querySelectorAll("input")].find((el) => el.dataset.usageProvider === focused)?.focus({ preventScroll: true });
+}
+
 function cardCollapsed(machine, key) {
   return localStorage.getItem("hs-pi-dashboard:card-collapsed:" + machine + ":" + key) === "1";
 }
@@ -919,6 +980,8 @@ function bindUsageCardToggles() {
 function renderUsage(fleet) {
   const body = document.getElementById("usage-body");
   const summary = document.getElementById("usage-summary");
+  const catalog = usageProviderCatalog(fleet);
+  renderUsageProviders(catalog);
   const focused = document.activeElement;
   const inBody = body.contains(focused);
   const focusKey = inBody && focused?.matches(".ucard-toggle") ? { ...focused.dataset } : null;
@@ -930,6 +993,12 @@ function renderUsage(fleet) {
     else return;
     (control || document.getElementById("usage-toggle")).focus({ preventScroll: true });
   };
+  if (!catalog.some((p) => usageProviderEnabled(p.key))) {
+    body.innerHTML = '<p class="uempty">No providers selected. Use Choose providers above to show usage and balances.</p>';
+    summary.textContent = "no providers selected";
+    restoreFocus();
+    return;
+  }
   const machines = (fleet.machines ?? []).filter((m) => m.usage && m.usage.cards?.length);
   if (!machines.length) {
     body.innerHTML = '<p class="uempty">no usage reporters online yet</p>';
@@ -943,6 +1012,7 @@ function renderUsage(fleet) {
   const byKey = new Map();
   for (const m of machines) {
     for (const c of m.usage.cards) {
+      if (!usageProviderEnabled(c.key)) continue;
       const prev = byKey.get(c.key);
       const better = !prev
         || (prev.error && !c.error)
@@ -952,6 +1022,12 @@ function renderUsage(fleet) {
     }
   }
   const cards = [...byKey.values()];
+  if (!cards.length) {
+    body.innerHTML = '<p class="uempty">Selected providers have not reported yet. Check agent setup or choose another provider.</p>';
+    summary.textContent = "waiting for selected providers";
+    restoreFocus();
+    return;
+  }
   // Providers and their windows both sort by urgency, so the window that runs
   // out first leads the board.
   const groups = cards
@@ -959,7 +1035,12 @@ function renderUsage(fleet) {
     .map((c) => ({ card: c, windows: c.gauges.map((g) => windowState(g, c.label, c.fetchedAt, c.error)).sort(compareUrgency) }))
     .sort((a, b) => compareUrgency(a.windows[0], b.windows[0]));
   const balances = cards.filter((c) => c.kind === "balance" && Number.isFinite(c.balanceUsd));
-  const missing = cards.filter((c) => !hasUsageData(c));
+  // A provider the user switched on that no agent reports (for example, Claude
+  // with agents older than the dashboard) is listed as not reporting, so
+  // checking it never appears to do nothing.
+  const absent = catalog.filter((p) => usageProviderPreferences[p.key] === true && !byKey.has(p.key))
+    .map((p) => ({ key: p.key, label: p.label, absent: true }));
+  const missing = [...cards.filter((c) => !hasUsageData(c)), ...absent];
   const refreshFailing = cards.filter((c) => hasUsageData(c) && c.error);
 
   const verdict = usageVerdict(groups.flatMap((g) => g.windows).sort(compareUrgency));
@@ -1306,6 +1387,10 @@ async function tick() {
 }
 
 initUsageToggle();
+document.getElementById("usage-provider-options").addEventListener("change", (event) => {
+  if (event.target.matches("input[data-usage-provider]")) setUsageProvider(event.target.dataset.usageProvider, event.target.checked);
+});
+renderUsageProviders(USAGE_PROVIDERS);
 bindUsageCardToggles();
 initPulse();
 tick();

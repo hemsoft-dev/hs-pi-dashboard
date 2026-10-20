@@ -343,6 +343,16 @@ One quota window per row on a shared 0-125% scale, so the 100% limit sits at 80%
 ### Failure Disclosure
 A `details` row at the foot of the board: Ember labels ("Not reporting:", "Refresh failing:") followed by Ash provider names, expanding to one Parchment-named line per failure. It takes one line when closed, so failures stay visible but smaller than working data.
 
+### Provider selection
+
+An inline "Choose providers" disclosure sits beneath the Usage heading and
+outside its collapsible data body. A native fieldset groups labeled checkboxes
+with a gold accent, Parchment text, 42px label targets and the existing gold
+focus outline. Options wrap naturally on phones. A quiet Ash-light note states
+that choices are saved in this browser. The controls stay mounted across polls
+and remain available in empty or offline states. Deselected providers contribute
+neither readings nor warnings to the board or its collapsed verdict.
+
 ### Buttons
 - **Shape:** 3px corners.
 - **Pager:** Panel Black fill, Hairline border, Burnished Gold 12px text, 2px x 10px padding.
