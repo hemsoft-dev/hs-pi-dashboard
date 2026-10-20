@@ -33,6 +33,7 @@ type runtimeSource struct {
 	now          func() time.Time
 	verify       func(context.Context, int, time.Time, *url.URL) error
 	scopedCLI    *bool
+	scopedFor    string // CLI the cached scope capability belongs to
 	identity     string
 	token        string
 	expires      time.Time
@@ -117,18 +118,46 @@ func newRuntime(path, binary string) *runtimeSource {
 		verify: verifyRuntimeProcess,
 		run: func(ctx context.Context, binary string, args ...string) ([]byte, error) {
 			// Capture stdout only; CLI diagnostics can include pairing URLs.
-			cmd := osexec.CommandContext(ctx, binary, args...)
-			hideCommandWindow(cmd)
-			return cmd.Output()
+			return t3Command(ctx, filepath.Dir(filepath.Dir(path)), binary, args...).Output()
 		},
 	}
 }
 
+// t3Command points an npm launcher at the monitored server's T3 home. Without
+// T3CODE_HOME the launcher looks in ~/.t3 and, when its version is missing
+// there, starts a runtime download that the collector deadline kills midway,
+// leaving partial staging folders behind on every poll.
+func t3Command(ctx context.Context, home, binary string, args ...string) *osexec.Cmd {
+	cmd := osexec.CommandContext(ctx, binary, args...)
+	cmd.Env = append(os.Environ(), "T3CODE_HOME="+home)
+	hideCommandWindow(cmd)
+	return cmd
+}
+
+// serverCLI prefers the running server's own native CLI from its base
+// directory, which matches the server and needs no Node launcher or download.
+// It falls back to the configured binary.
+func (r *runtimeSource) serverCLI(version string) string {
+	if version == "" || version != filepath.Base(version) || version == "." || version == ".." {
+		return r.binary
+	}
+	name := "t3"
+	if runtime.GOOS == "windows" {
+		name = "t3.exe"
+	}
+	native := filepath.Join(filepath.Dir(filepath.Dir(r.path)), "runtime", "versions", version, name)
+	if info, err := os.Stat(native); err == nil && info.Mode().IsRegular() {
+		return native
+	}
+	return r.binary
+}
+
 func (r *runtimeSource) snapshot(ctx context.Context) ([]liveThread, error) {
 	var record struct {
-		PID       int    `json:"pid"`
-		Origin    string `json:"origin"`
-		StartedAt string `json:"startedAt"`
+		PID           int    `json:"pid"`
+		Origin        string `json:"origin"`
+		StartedAt     string `json:"startedAt"`
+		ServerVersion string `json:"serverVersion"`
 	}
 	data, err := os.ReadFile(r.path)
 	if err != nil || json.Unmarshal(data, &record) != nil || record.PID <= 0 || parseTime(record.StartedAt).IsZero() {
@@ -151,7 +180,7 @@ func (r *runtimeSource) snapshot(ctx context.Context) ([]liveThread, error) {
 		r.token, r.identity = "", identity
 	}
 	if r.token == "" || !r.now().Add(time.Minute).Before(r.expires) {
-		if err := r.authorize(ctx, base); err != nil {
+		if err := r.authorize(ctx, base, r.serverCLI(record.ServerVersion)); err != nil {
 			return nil, err
 		}
 	}
@@ -225,14 +254,14 @@ func (r *runtimeSource) snapshot(ctx context.Context) ([]liveThread, error) {
 	return threads, nil
 }
 
-func (r *runtimeSource) authorize(ctx context.Context, base string) error {
-	if r.scopedCLI == nil {
-		help, err := r.run(ctx, r.binary, "auth", "pairing", "create", "--help")
+func (r *runtimeSource) authorize(ctx context.Context, base, binary string) error {
+	if r.scopedCLI == nil || r.scopedFor != binary {
+		help, err := r.run(ctx, binary, "auth", "pairing", "create", "--help")
 		if err != nil {
 			return errors.New("T3 local pairing capabilities unavailable")
 		}
 		supported := strings.Contains(string(help), "--scope ")
-		r.scopedCLI = &supported
+		r.scopedCLI, r.scopedFor = &supported, binary
 	}
 	args := []string{"auth", "pairing", "create", "--base-dir", filepath.Dir(filepath.Dir(r.path)),
 		"--ttl", "1m", "--label", "hs-pi-dashboard read-only", "--json"}
@@ -241,7 +270,7 @@ func (r *runtimeSource) authorize(ctx context.Context, base string) error {
 	}
 	// Older supported CLIs have no scope flag. Their one-minute, single-use
 	// grant is sent only to the verified local process and immediately narrowed.
-	data, err := r.run(ctx, r.binary, args...)
+	data, err := r.run(ctx, binary, args...)
 	var grant struct {
 		Credential string `json:"credential"`
 	}
