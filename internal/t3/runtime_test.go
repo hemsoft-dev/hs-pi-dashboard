@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -428,5 +429,90 @@ func TestRuntimeStartRejectsReusedProcess(t *testing.T) {
 	}
 	if !sameRuntimeStart(now, now.Add(5*time.Second)) {
 		t.Fatal("rejected normal server startup")
+	}
+}
+
+func TestT3CommandPointsLauncherAtServerHome(t *testing.T) {
+	cmd := t3Command(context.Background(), "/srv/t3-home", "t3", "auth", "pairing", "create", "--help")
+	if got := cmd.Env[len(cmd.Env)-1]; got != "T3CODE_HOME=/srv/t3-home" {
+		t.Fatalf("env tail=%q", got)
+	}
+	if !reflect.DeepEqual(cmd.Args, []string{"t3", "auth", "pairing", "create", "--help"}) {
+		t.Fatalf("args=%v", cmd.Args)
+	}
+}
+
+func TestServerCLIPrefersRunningServerRuntime(t *testing.T) {
+	base := t.TempDir()
+	r := newRuntime(filepath.Join(base, "userdata", "state.sqlite"), "configured-t3")
+	name := "t3"
+	if runtime.GOOS == "windows" {
+		name = "t3.exe"
+	}
+	native := filepath.Join(base, "runtime", "versions", "0.1.1-nightly.1", name)
+	if err := os.MkdirAll(filepath.Dir(native), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(native, []byte("bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A directory where the CLI should be is not a CLI.
+	if err := os.MkdirAll(filepath.Join(base, "runtime", "versions", "dir-only", name), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for version, want := range map[string]string{
+		"0.1.1-nightly.1":    native,
+		"missing":            "configured-t3",
+		"dir-only":           "configured-t3",
+		"":                   "configured-t3",
+		".":                  "configured-t3",
+		"..":                 "configured-t3",
+		"../0.1.1-nightly.1": "configured-t3",
+	} {
+		if got := r.serverCLI(version); got != want {
+			t.Errorf("serverCLI(%q)=%q, want %q", version, got, want)
+		}
+	}
+}
+
+func TestPairingUsesServerCLIAndRechecksScopeWhenItChanges(t *testing.T) {
+	base := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(base, "userdata"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(base, "userdata", "state.sqlite")
+	createDB(t, path)
+	c := New(path, time.Minute, "")
+	now := time.Date(2026, 10, 10, 1, 0, 0, 0, time.UTC)
+	c.now = func() time.Time { return now }
+	f, server := attachRuntime(t, c)
+	f.threads = []liveThread{}
+	name := "t3"
+	if runtime.GOOS == "windows" {
+		name = "t3.exe"
+	}
+	native := filepath.Join(base, "runtime", "versions", "9.9.9", name)
+	if err := os.MkdirAll(filepath.Dir(native), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(native, []byte("bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := json.Marshal(map[string]any{"pid": 1, "origin": server.URL, "startedAt": "2026-10-10T01:00:00Z", "serverVersion": "9.9.9"})
+	if err := os.WriteFile(c.runtime.path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	original := c.runtime.run
+	var used []string
+	c.runtime.run = func(ctx context.Context, binary string, args ...string) ([]byte, error) {
+		used = append(used, binary)
+		return original(ctx, "t3-native", args...)
+	}
+	// A capability cached for the configured CLI must not carry over.
+	configured := false
+	c.runtime.scopedCLI, c.runtime.scopedFor = &configured, "t3-native"
+	c.Poll()
+	if len(used) != 2 || used[0] != native || used[1] != native || c.runtime.scopedFor != native || f.grants != 1 {
+		t.Fatalf("used=%v scopedFor=%q grants=%d", used, c.runtime.scopedFor, f.grants)
 	}
 }

@@ -239,6 +239,14 @@ under `%APPDATA%\npm\node_modules\t3\node_modules\@t3code\t3-win32-x64\t3.exe`.
 The environment base directory comes from the database path: for
 `~/.t3-server/userdata/state.sqlite`, pairing uses `~/.t3-server`. Separate
 configured environments get separate credentials and stable thread identities.
+When `server-runtime.json` names a `serverVersion` and
+`<base>/runtime/versions/<serverVersion>/t3` (`t3.exe` on Windows) exists, the
+agent pairs with that native CLI, which matches the running server and needs no
+Node launcher. Otherwise it runs the configured CLI with `T3CODE_HOME=<base>`,
+so an npm launcher finds runtimes in the monitored environment instead of
+downloading into `~/.t3`. Before this, a launcher whose version was missing
+from `~/.t3` downloaded on every poll, and the deadline killed each download,
+leaving partial `.staging-*` folders (#42).
 The supplied Air LaunchAgent sets an absolute `-t3-bin` path because launchd does
 not inherit an interactive shell's PATH. Adjust that path for other installations.
 
