@@ -34,6 +34,32 @@ func TestClaudeWindows(t *testing.T) {
 	}
 }
 
+func TestClaudeRoutinesAliasesAndLimitFallbacks(t *testing.T) {
+	now := time.Date(2026, 10, 19, 10, 0, 0, 0, time.UTC)
+	labels := func(g []Gauge) string {
+		var out []string
+		for _, x := range g {
+			out = append(out, fmt.Sprintf("%s=%v", x.Label, *x.UsedPercent))
+		}
+		return strings.Join(out, ",")
+	}
+	// The Cowork alias is used when the canonical Routines key is absent or unusable.
+	g, err := parseClaudeWindows([]byte(`{"seven_day_routines":[],"seven_day_cowork":{"utilization":7}}`), now)
+	if err != nil || labels(g) != "Routines · weekly=7" {
+		t.Fatalf("cowork=%s err=%v", labels(g), err)
+	}
+	// Limits-only responses still report the session and weekly windows.
+	g, err = parseClaudeWindows([]byte(`{"limits":[null,{"kind":"session","group":"session","percent":"11"},{"kind":"session","group":"session","percent":12,"resets_at":"2026-10-19T12:00:00Z","scope":null},{"kind":"weekly_all","group":"weekly","percent":9,"scope":null},{"kind":"weekly_scoped","group":"weekly","percent":5,"scope":{"model":{"display_name":"Fable"}}}]}`), now)
+	if err != nil || labels(g) != "5h=12,Weekly=9,Fable · weekly=5" || g[0].WindowSeconds != 18000 || g[0].ResetAt.IsZero() {
+		t.Fatalf("limits-only=%s err=%v", labels(g), err)
+	}
+	// Root windows win when both shapes are present, so nothing is reported twice.
+	g, err = parseClaudeWindows([]byte(`{"five_hour":{"utilization":40},"seven_day":{"utilization":25},"limits":[{"kind":"session","group":"session","percent":11},{"kind":"weekly_all","group":"weekly","percent":9}]}`), now)
+	if err != nil || labels(g) != "5h=40,Weekly=25" {
+		t.Fatalf("both shapes=%s err=%v", labels(g), err)
+	}
+}
+
 func TestClaudePartialAndInvalidWindows(t *testing.T) {
 	now := time.Now()
 	for _, body := range []string{`null`, `false`, `[]`, `{`, `{}`, `{"extra_usage":{"utilization":0}}`, `{"five_hour":{"utilization":"50"}}`, `{"five_hour":{"utilization":true}}`, `{"five_hour":{"utilization":null}}`, `{"five_hour":{"utilization":-1}}`, `{"five_hour":{"utilization":101,"resets_at":"invalid"}}`} {
@@ -118,7 +144,7 @@ func TestClaudeFetchErrorsAndHeaders(t *testing.T) {
 		calls = 0
 		f.Client.Transport = claudeTransport(func(r *http.Request) (*http.Response, error) {
 			calls++
-			if r.Method != "GET" || r.URL.String() != claudeUsageURL || r.Header.Get("Authorization") != "Bearer synthetic-secret" || r.Header.Get("anthropic-beta") != "oauth-2025-04-20" {
+			if r.Method != "GET" || r.URL.String() != claudeUsageURL || r.Header.Get("Authorization") != "Bearer synthetic-secret" || r.Header.Get("anthropic-beta") != "oauth-2025-04-20" || r.Header.Get("User-Agent") != claudeUserAgent || r.Header.Get("Content-Type") != "application/json" {
 				t.Fatalf("bad request method/url/headers")
 			}
 			if status == 0 {

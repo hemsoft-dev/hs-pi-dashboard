@@ -76,10 +76,13 @@ start enabled and Claude starts disabled. To use Claude instead of Antigravity,
 uncheck Antigravity and check Claude. The selector remains available when the
 section is collapsed, agents are offline, or every provider is disabled.
 These are display preferences; agents keep refreshing their cached readings.
+A provider you switch on that no agent reports yet, such as Claude with older
+agents, is listed under **Not reporting** until the agents are updated.
 
 Claude reports subscription quotas from the read-only
 `GET https://api.anthropic.com/api/oauth/usage` endpoint with the
-`anthropic-beta: oauth-2025-04-20` header, using an existing subscription session.
+`anthropic-beta: oauth-2025-04-20` header and a Claude Code `User-Agent` (some
+valid sessions are refused otherwise), using an existing subscription session.
 Credential precedence on each agent is `CLAUDE_CODE_OAUTH_TOKEN`, Claude Code's
 `~/.claude/.credentials.json` (`claudeAiOauth.accessToken`), then Pi's
 `~/.pi/agent/auth.json` (`anthropic.access`). `CLAUDE_CONFIG_DIR` replaces the
@@ -92,7 +95,9 @@ shows a setup/error message; renew it in its owning app. Service processes need
 the same home directory or environment override as the signed-in account.
 
 The collector supports five-hour, weekly, model-specific weekly and OAuth-app
-windows, Routines weekly usage, and model-scoped `limits` entries. Missing or
+windows, Routines weekly usage (including the `seven_day_cowork` alias), and
+model-scoped `limits` entries. Unscoped `limits` session and weekly entries are
+used only when the matching `five_hour` or `seven_day` window is absent. Missing or
 invalid values remain unavailable, while valid sibling windows still report.
 Forecasts require a valid reset within the known window duration and at least
 two minutes elapsed. Extra-usage spend and session token totals are excluded.

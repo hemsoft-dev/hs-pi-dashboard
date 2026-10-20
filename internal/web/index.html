@@ -566,6 +566,7 @@ function headerStamp(source, cards) {
   return `<span class="ufresh">updated ${rel(oldest)}</span>`;
 }
 function failureText(card) {
+  if (card.absent) return "no agent reports it yet; update agents to enable it";
   if (card.kind !== "quota" && card.kind !== "balance") return "no usage source yet";
   const what = card.kind === "balance" ? "balance" : "usage";
   if (card.error) return `couldn't read ${what}`;
@@ -1034,7 +1035,12 @@ function renderUsage(fleet) {
     .map((c) => ({ card: c, windows: c.gauges.map((g) => windowState(g, c.label, c.fetchedAt, c.error)).sort(compareUrgency) }))
     .sort((a, b) => compareUrgency(a.windows[0], b.windows[0]));
   const balances = cards.filter((c) => c.kind === "balance" && Number.isFinite(c.balanceUsd));
-  const missing = cards.filter((c) => !hasUsageData(c));
+  // A provider the user switched on that no agent reports (for example, Claude
+  // with agents older than the dashboard) is listed as not reporting, so
+  // checking it never appears to do nothing.
+  const absent = catalog.filter((p) => usageProviderPreferences[p.key] === true && !byKey.has(p.key))
+    .map((p) => ({ key: p.key, label: p.label, absent: true }));
+  const missing = [...cards.filter((c) => !hasUsageData(c)), ...absent];
   const refreshFailing = cards.filter((c) => hasUsageData(c) && c.error);
 
   const verdict = usageVerdict(groups.flatMap((g) => g.windows).sort(compareUrgency));

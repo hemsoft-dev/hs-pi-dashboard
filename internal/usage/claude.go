@@ -13,6 +13,10 @@ import (
 
 const claudeUsageURL = "https://api.anthropic.com/api/oauth/usage"
 
+// The endpoint rejects some valid sessions unless the request looks like a
+// Claude Code client. CodexBar uses the same fallback version.
+const claudeUserAgent = "claude-code/2.1.0"
+
 // Read an existing subscription session. Authentication remains owned by Claude
 // Code or Pi: this collector never renews tokens or writes credential files.
 func (f *Fetcher) claudeToken() string {
@@ -55,7 +59,8 @@ func (f *Fetcher) claude(ctx context.Context) Card {
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("anthropic-beta", "oauth-2025-04-20")
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", "hs-pi-dashboard/0.2")
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", claudeUserAgent)
 	body, err := doRequest(f.Client, req)
 	if err != nil {
 		// Transport errors can contain response URLs or sensitive proxy details.
@@ -86,10 +91,10 @@ func parseClaudeWindows(body []byte, now time.Time) ([]Gauge, error) {
 		return nil, fmt.Errorf("invalid Claude usage response")
 	}
 	var gauges []Gauge
-	appendWindow := func(label string, duration float64, raw json.RawMessage, percentKey string) {
+	appendWindow := func(label string, duration float64, raw json.RawMessage, percentKey string) bool {
 		var w map[string]json.RawMessage
 		if json.Unmarshal(raw, &w) != nil || w == nil {
-			return
+			return false
 		}
 		g := Gauge{Label: label, WindowSeconds: duration}
 		var used float64
@@ -101,7 +106,7 @@ func parseClaudeWindows(body []byte, now time.Time) ([]Gauge, error) {
 			g.ResetAt, _ = time.Parse(time.RFC3339Nano, reset)
 		}
 		if g.UsedPercent == nil && g.ResetAt.IsZero() {
-			return
+			return false
 		}
 		if g.UsedPercent != nil && !g.ResetAt.IsZero() {
 			if p, ok := projectEndPercent(label, used, g.ResetAt.Sub(now).Seconds(), duration, now, false); ok {
@@ -109,34 +114,66 @@ func parseClaudeWindows(body []byte, now time.Time) ([]Gauge, error) {
 			}
 		}
 		gauges = append(gauges, g)
+		return true
+	}
+	type limitEntry struct {
+		Kind, Group string
+		Scope       struct {
+			Model struct {
+				ID   string `json:"id"`
+				Name string `json:"display_name"`
+			} `json:"model"`
+		} `json:"scope"`
+		raw json.RawMessage
+	}
+	var rawLimits []json.RawMessage
+	_ = json.Unmarshal(root["limits"], &rawLimits)
+	var limits []limitEntry
+	for _, raw := range rawLimits {
+		var entry limitEntry
+		if json.Unmarshal(raw, &entry) == nil {
+			entry.raw = raw
+			limits = append(limits, entry)
+		}
+	}
+	// Root windows come first. Unscoped limit entries stand in for the
+	// session and weekly windows only when the root window is unusable, so
+	// responses carrying both shapes never report the same quota twice.
+	limitFallback := func(label string, duration float64, kind, group string) {
+		for _, entry := range limits {
+			if entry.Kind == kind && entry.Group == group && appendWindow(label, duration, entry.raw, "percent") {
+				return
+			}
+		}
 	}
 	for _, spec := range []struct {
-		key, label string
-		seconds    float64
+		keys          []string
+		label         string
+		seconds       float64
+		fallbackKind  string
+		fallbackGroup string
 	}{
-		{"five_hour", "5h", 5 * 3600},
-		{"seven_day", "Weekly", 7 * 86400},
-		{"seven_day_sonnet", "Sonnet · weekly", 7 * 86400},
-		{"seven_day_opus", "Opus · weekly", 7 * 86400},
-		{"seven_day_oauth_apps", "OAuth apps · weekly", 7 * 86400},
-		{"seven_day_routines", "Routines · weekly", 7 * 86400},
+		{[]string{"five_hour"}, "5h", 5 * 3600, "session", "session"},
+		{[]string{"seven_day"}, "Weekly", 7 * 86400, "weekly_all", "weekly"},
+		{[]string{"seven_day_sonnet"}, "Sonnet · weekly", 7 * 86400, "", ""},
+		{[]string{"seven_day_opus"}, "Opus · weekly", 7 * 86400, "", ""},
+		{[]string{"seven_day_oauth_apps"}, "OAuth apps · weekly", 7 * 86400, "", ""},
+		// Accounts report Routines under several names, including the Cowork alias.
+		{[]string{"seven_day_routines", "seven_day_claude_routines", "claude_routines", "routines", "routine", "seven_day_cowork", "cowork"}, "Routines · weekly", 7 * 86400, "", ""},
 	} {
-		appendWindow(spec.label, spec.seconds, root[spec.key], "utilization")
-	}
-	var limits []json.RawMessage
-	_ = json.Unmarshal(root["limits"], &limits)
-	seen := map[string]bool{}
-	for _, raw := range limits {
-		var entry struct {
-			Kind, Group string
-			Scope       struct {
-				Model struct {
-					ID   string `json:"id"`
-					Name string `json:"display_name"`
-				} `json:"model"`
-			} `json:"scope"`
+		found := false
+		for _, key := range spec.keys {
+			if found = appendWindow(spec.label, spec.seconds, root[key], "utilization"); found {
+				break
+			}
 		}
-		if json.Unmarshal(raw, &entry) != nil || entry.Kind != "weekly_scoped" || entry.Group != "weekly" {
+		if !found && spec.fallbackKind != "" {
+			limitFallback(spec.label, spec.seconds, spec.fallbackKind, spec.fallbackGroup)
+		}
+	}
+	seen := map[string]bool{}
+	for _, entry := range limits {
+		if entry.Kind != "weekly_scoped" || entry.Group != "weekly" {
 			continue
 		}
 		name := strings.TrimSpace(entry.Scope.Model.Name)
@@ -148,9 +185,7 @@ func parseClaudeWindows(body []byte, now time.Time) ([]Gauge, error) {
 			id = name
 		}
 		if !seen[id] {
-			before := len(gauges)
-			appendWindow(name+" · weekly", 7*86400, raw, "percent")
-			seen[id] = len(gauges) > before
+			seen[id] = appendWindow(name+" · weekly", 7*86400, entry.raw, "percent")
 		}
 	}
 	if len(gauges) == 0 {

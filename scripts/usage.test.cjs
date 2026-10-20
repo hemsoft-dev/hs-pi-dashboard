@@ -292,6 +292,20 @@ test('provider choices remove disabled readings, failures and freshness from all
   assert.doesNotMatch(body.innerHTML, /Moonshot AI|Prepaid balances/);
 });
 
+test('a switched-on provider that no agent reports is listed as not reporting', () => {
+  const { r, body, summary } = renderer();
+  const fleet = { machines: [{ usage: { cards: [card({ gauges: [gauge(30, 50)] })] } }] };
+  r.lastFleet = fleet;
+  r.renderUsage(fleet);
+  assert.doesNotMatch(body.innerHTML, /ufail|Claude/);
+  r.setUsageProvider('claude', true);
+  assert.match(body.innerHTML, /Not reporting:<\/b> Claude.*<b>Claude<\/b> no agent reports it yet; update agents to enable it/);
+  assert.match(body.innerHTML, /class="ucard-label">Codex/);
+  assert.match(summary.innerHTML, /all plans on pace.*updated now/);
+  r.setUsageProvider('claude', false);
+  assert.doesNotMatch(body.innerHTML, /ufail|Claude/);
+});
+
 test('all-disabled state survives reload and keeps every choice available without reporters', () => {
   const { r, storage, body, options, summary } = renderer();
   for (const provider of r.usageProviderCatalog({})) r.setUsageProvider(provider.key, false);
