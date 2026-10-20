@@ -62,9 +62,11 @@ test('quota boundaries draw on the shared 0-125% scale with the limit at 100%', 
 
 test('forecasts keep their uncapped value and say when the window runs out', () => {
   const { r } = renderer();
-  const w = r.windowState(gauge(50, 125), 'Codex');
+  // 30s of slack keeps the countdown above 6h 40m even when the runner is
+  // slow between building the fixture and rendering it.
+  const w = r.windowState(gauge(50, 125, { resetAt: new Date(Date.now() + 10 * H + 30000).toISOString() }), 'Codex');
   assert.equal(w.status, 'risk');
-  // 50% used, 125% at reset in 10h: 50 more points at 7.5/h runs out in 6h 40m.
+  // 50% used, 125% at reset in ~10h: 50 more points at 7.5/h runs out in ~6h 40m.
   assert.equal(Math.round(w.runsOutMs / 60000), 400);
   const html = r.quotaRow(w);
   assert.match(html, /<b>125%<\/b><span class="ulbl"> at reset<\/span> <span class="uphrase">runs out in 6h 40m/);
