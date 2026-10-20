@@ -63,6 +63,15 @@ func TestClaudeRoutinesAliasesAndLimitFallbacks(t *testing.T) {
 	if err != nil || labels(g) != "5h=40,Weekly=25" {
 		t.Fatalf("unusable structured=%s err=%v", labels(g), err)
 	}
+	// A structured entry with only a reset never hides a measured root reading.
+	g, err = parseClaudeWindows([]byte(`{"five_hour":{"utilization":40},"limits":[{"kind":"session","percent":null,"resets_at":"2026-10-19T12:00:00Z"}]}`), now)
+	if err != nil || labels(g) != "5h=40" {
+		t.Fatalf("reset-only structured=%s err=%v", labels(g), err)
+	}
+	g, err = parseClaudeWindows([]byte(`{"limits":[{"kind":"session","resets_at":"2026-10-19T12:00:00Z"}]}`), now)
+	if err != nil || len(g) != 1 || g[0].UsedPercent != nil || g[0].ResetAt.IsZero() {
+		t.Fatalf("reset-only alone=%+v err=%v", g, err)
+	}
 	// Scoped limits count whatever their display group.
 	g, err = parseClaudeWindows([]byte(`{"limits":[{"kind":"weekly_scoped","group":"model","percent":17.2,"scope":{"model":{"display_name":"Fable"}}}]}`), now)
 	if err != nil || labels(g) != "Fable weekly=17.2" {
@@ -229,6 +238,8 @@ func TestClaudeRateLimitCooldown(t *testing.T) {
 		want   time.Duration
 	}{
 		{now.Add(10 * time.Minute).Format(http.TimeFormat), 10 * time.Minute},
+		{"0", 0},
+		{now.Add(-time.Minute).Format(http.TimeFormat), 0},
 		{"", claudeDefaultCooldown},
 		{"soon", claudeDefaultCooldown},
 		{"86400", claudeMaxCooldown},
@@ -237,6 +248,11 @@ func TestClaudeRateLimitCooldown(t *testing.T) {
 		if until := g.block("t", tc.header, now); until.Sub(now) != tc.want {
 			t.Errorf("Retry-After %q blocked for %v, want %v", tc.header, until.Sub(now), tc.want)
 		}
+	}
+	// A zero delay leaves the session free to retry on the next refresh.
+	g.clear("t")
+	if until := g.block("t", "0", now); !g.blockedUntil("t", now).IsZero() || claudeRateLimited(until, now) != "Claude usage rate limited; retrying on the next refresh" {
+		t.Error("Retry-After: 0 still blocked the session")
 	}
 	// A shorter later Retry-After never shortens an existing cooldown.
 	g.clear("t")

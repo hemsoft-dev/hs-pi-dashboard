@@ -50,10 +50,11 @@ func (g *claudeRateGate) blockedUntil(token string, now time.Time) time.Time {
 
 func (g *claudeRateGate) block(token, retryAfter string, now time.Time) time.Time {
 	wait := claudeDefaultCooldown
-	if seconds, err := strconv.Atoi(strings.TrimSpace(retryAfter)); err == nil && seconds > 0 {
+	// Zero seconds and already-elapsed dates permit an immediate retry.
+	if seconds, err := strconv.Atoi(strings.TrimSpace(retryAfter)); err == nil && seconds >= 0 {
 		wait = time.Duration(seconds) * time.Second
-	} else if at, err := http.ParseTime(retryAfter); err == nil && at.After(now) {
-		wait = at.Sub(now)
+	} else if at, err := http.ParseTime(retryAfter); err == nil {
+		wait = max(at.Sub(now), 0)
 	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -75,6 +76,9 @@ func (g *claudeRateGate) clear(token string) {
 }
 
 func claudeRateLimited(until, now time.Time) string {
+	if !until.After(now) {
+		return "Claude usage rate limited; retrying on the next refresh"
+	}
 	return fmt.Sprintf("Claude usage rate limited; next attempt in %dm", int(math.Ceil(until.Sub(now).Minutes())))
 }
 
@@ -251,18 +255,6 @@ func parseClaudeWindows(body []byte, now time.Time) ([]Gauge, error) {
 	// Structured session and weekly entries are canonical; the root
 	// five_hour/seven_day windows are compatibility fallbacks, so responses
 	// carrying both shapes never report the same quota twice.
-	structured := func(label string, duration float64, kind string) bool {
-		for _, entry := range limits {
-			if entry.Kind != kind || entry.Scope.Model.Name != "" || entry.Scope.Model.ID != "" {
-				continue
-			}
-			if g, ok := parseWindow(label, duration, entry.raw, "percent"); ok {
-				gauges = append(gauges, g)
-				return true
-			}
-		}
-		return false
-	}
 	for _, spec := range []struct {
 		keys    []string
 		label   string
@@ -278,14 +270,34 @@ func parseClaudeWindows(body []byte, now time.Time) ([]Gauge, error) {
 		// Accounts report Routines under several names, including the Cowork alias.
 		{[]string{"seven_day_routines", "seven_day_claude_routines", "claude_routines", "routines", "routine", "seven_day_cowork", "cowork"}, "Routines weekly", 7 * 86400, "", ""},
 	} {
-		if coveredByScoped(spec.model) || (spec.kind != "" && structured(spec.label, spec.seconds, spec.kind)) {
+		if coveredByScoped(spec.model) {
 			continue
+		}
+		var candidates []Gauge
+		for _, entry := range limits {
+			if spec.kind == "" || entry.Kind != spec.kind || entry.Scope.Model.Name != "" || entry.Scope.Model.ID != "" {
+				continue
+			}
+			if g, ok := parseWindow(spec.label, spec.seconds, entry.raw, "percent"); ok {
+				candidates = append(candidates, g)
+			}
 		}
 		for _, key := range spec.keys {
 			if g, ok := parseWindow(spec.label, spec.seconds, root[key], "utilization"); ok {
-				gauges = append(gauges, g)
-				break
+				candidates = append(candidates, g)
 			}
+		}
+		// The first measured candidate wins; a reset-only entry never hides a
+		// measured fallback, but still reports when nothing better exists.
+		if len(candidates) > 0 {
+			pick := candidates[0]
+			for _, c := range candidates {
+				if c.UsedPercent != nil {
+					pick = c
+					break
+				}
+			}
+			gauges = append(gauges, pick)
 		}
 	}
 	gauges = append(gauges, scoped...)
