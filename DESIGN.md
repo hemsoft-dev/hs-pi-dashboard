@@ -390,3 +390,13 @@ A self-contained green oscilloscope on Scope Black with a Scope Rim border, a 34
 - **Don't** use Ember for "near limit" or for decoration; near limit is gold.
 - **Don't** set readable text dimmer than Ash (#8a8578, 5.28:1 on #0d0d0d).
 - **Don't** render quota windows as one dial or card per provider; quota windows share one runway scale and one limit line.
+
+## Projects
+
+Projects uses the existing gold section toggle and hairline-bordered repository
+rows. A summary keeps the repository, Clean/Attention state, PR/issue counts and
+checkout count visible. Native keyboard-operable disclosures reveal per-machine
+local health followed by one set of GitHub tables. Coral marks unavailable or
+attention health; producer verdict words remain visible. Tables scroll within
+the panel on phones, with focusable labeled scroll regions. Expansion and focus
+survive polling; the section preference is browser-local.

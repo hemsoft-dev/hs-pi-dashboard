@@ -6,6 +6,8 @@
 <title>Agent Fleet Dashboard</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 128 128'%3E%3Crect width='128' height='128' rx='28' fill='%23050505'/%3E%3Crect x='2' y='2' width='124' height='124' rx='26' fill='none' stroke='%23262626' stroke-width='4'/%3E%3Cpath d='M28 38 54 64 28 90' fill='none' stroke='%23ffd700' stroke-width='14' stroke-linecap='round' stroke-linejoin='round'/%3E%3Crect x='66' y='31' width='30' height='14' rx='7' fill='%23b89b23'/%3E%3Crect x='66' y='57' width='40' height='14' rx='7' fill='%23b89b23'/%3E%3Crect x='66' y='83' width='34' height='14' rx='7' fill='%23ffd700'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="/assets/herdr.css">
+<link rel="stylesheet" href="/assets/projects.css">
+<script src="/assets/projects.js"></script>
 <style>
   :root {
     --gold: #ffd700;
@@ -330,6 +332,10 @@
   <ul id="herdr-rows" class="herdr-rows" aria-label="Live agents"><li class="herdr-empty">Connecting to agent collectors...</li></ul>
   <p id="herdr-note" class="herdr-note">The dashboard reads agent states. Use a machine terminal to interact.</p>
   </div>
+</section>
+<section class="projects-section" aria-labelledby="projects-title">
+<h2 id="projects-title"><button id="projects-toggle" class="usage-toggle" type="button" aria-expanded="true" aria-controls="projects-body"><span class="chev" aria-hidden="true">▾</span> Projects <span class="hint" id="projects-summary">loading projects…</span></button></h2>
+<div id="projects-body"><p class="pnote">Collecting project status…</p></div>
 </section>
 <section class="usage-section" aria-labelledby="usage-title">
   <h2 id="usage-title"><button id="usage-toggle" type="button" aria-controls="usage-body" class="usage-toggle" aria-expanded="true">
@@ -1353,6 +1359,7 @@ function renderSessions() {
   if (focusedId) document.getElementById(focusedId)?.focus({ preventScroll: true });
   renderUsage(lastFleet);
   HerdrDashboard.render(lastFleet);
+  ProjectsDashboard.render(lastFleet.projects);
   if (activeFlashDetected) triggerActivityPulse(lastFleet.activeSessions || 0);
 }
 
@@ -1386,6 +1393,7 @@ async function tick() {
   }
 }
 
+ProjectsDashboard.init();
 initUsageToggle();
 document.getElementById("usage-provider-options").addEventListener("change", (event) => {
   if (event.target.matches("input[data-usage-provider]")) setUsageProvider(event.target.dataset.usageProvider, event.target.checked);

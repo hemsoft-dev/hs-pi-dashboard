@@ -73,6 +73,8 @@ Agent flags:
   -t3-bin string        installed T3 CLI for read-only runtime pairing (default t3)
   -machine string       label reported in the snapshot (default hostname)
   -active-window dur    how long a quiet session counts as active (default 2m)
+  -project-path string local checkout; repeat for multiple, off disables
+  -projects-poll dur   project refresh interval (default 2m)
   -herdr-bin string     installed Herdr executable (default auto-discover)
 
 Serve flags:
@@ -88,6 +90,9 @@ func runAgent(args []string) error {
 	addr := fs.String("addr", ":8787", "listen address")
 	dir := fs.String("dir", "", "pi sessions dir (default ~/.pi/agent/sessions)")
 	claudeDir := fs.String("claude-dir", "", "Claude Code projects dir (default ~/.claude/projects)")
+	var projectPaths []string
+	fs.Func("project-path", "local checkout; repeat, off disables; default ~/github discovery", func(path string) error { projectPaths = append(projectPaths, path); return nil })
+	projectsPoll := fs.Duration("projects-poll", 2*time.Minute, "project refresh interval")
 	var t3DBs []string
 	fs.Func("t3-db", "T3 SQLite database; repeat for multiple environments, off disables", func(path string) error {
 		t3DBs = append(t3DBs, path)
@@ -117,6 +122,8 @@ func runAgent(args []string) error {
 		Machine:      label,
 		ActiveWindow: *window,
 		HerdrBinary:  *herdrBin,
+		ProjectPaths: projectPaths,
+		ProjectsPoll: *projectsPoll,
 	})
 }
 
