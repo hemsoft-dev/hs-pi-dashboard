@@ -22,3 +22,11 @@ var HerdrCSS []byte
 //
 //go:embed vendor/smoothie-1.36.1.js
 var SmoothieJS []byte
+
+// ProjectsJS and ProjectsCSS render the gh-x status section.
+//
+//go:embed projects.js
+var ProjectsJS []byte
+
+//go:embed projects.css
+var ProjectsCSS []byte

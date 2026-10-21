@@ -34,7 +34,7 @@ jobs:
         run: go test ./...
 
       - name: Test dashboard renderers
-        run: node --test scripts/pulse.test.cjs scripts/sessions.test.cjs scripts/usage.test.cjs internal/web/herdr.test.cjs
+        run: node --test scripts/pulse.test.cjs scripts/sessions.test.cjs scripts/usage.test.cjs internal/web/herdr.test.cjs internal/web/projects.test.cjs
 
       - name: Test deployment binary checks
         run: python -m unittest discover -s deploy -p test_build_fleet.py

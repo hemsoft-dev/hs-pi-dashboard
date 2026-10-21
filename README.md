@@ -306,6 +306,31 @@ Check each agent's `/sessions` source health and the dashboard's `/api/fleet` pa
 The dashboard can be opened in T3's browser panel as an ordinary page. Merge and
 fleet installation are separate from implementing this collector.
 
+## Projects
+
+Agents expose cached `GET /projects` snapshots from `gh x status --json`
+(schemaVersion 1, gh-x v0.22.0 or newer). Install gh-x and authenticate gh
+under the service account. Each agent runs only its own configured checkouts,
+with three workers, a 45-second deadline per checkout, an 8 MiB output limit,
+and a two-minute refresh. HTTP requests never launch scans.
+
+Repeat `-project-path /absolute/checkout` for an explicit list; `-project-path off`
+disables it. Without flags, discover primary repositories immediately under
+`~/github` and `~/github/<owner>`, falling back to the working directory. Linked
+worktrees are represented by gh-x health, rather than scanned independently.
+Use `-projects-poll 5m` to change refresh cadence. No shell or GitHub status
+policy is reproduced by the dashboard. It preserves gh-x clean booleans and
+review/check verdict strings, including unknown values.
+
+The hub merges the newest document per hosted repository into `/api/fleet.projects`
+while retaining health and collection failures for every machine and checkout.
+The expandable Projects section shows PRs, issues, merged PRs and runs once
+per repository, with GitHub links and each section's own freshness/error metadata.
+Counts are row counts from gh-x, so its default five merged PRs/runs remain five.
+An unavailable section is never presented as an empty success. Failed refreshes
+retain their last document and original timestamp; offline machines remain explicit.
+Missing/old agents report a Projects warning without affecting session or usage collection.
+
 ## Build
 
 ```powershell

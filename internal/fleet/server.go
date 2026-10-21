@@ -16,6 +16,7 @@ import (
 
 	"github.com/HemSoft/hs-pi-dashboard/internal/herdr"
 	"github.com/HemSoft/hs-pi-dashboard/internal/hermes"
+	"github.com/HemSoft/hs-pi-dashboard/internal/projects"
 	"github.com/HemSoft/hs-pi-dashboard/internal/sessions"
 	"github.com/HemSoft/hs-pi-dashboard/internal/usage"
 	"github.com/HemSoft/hs-pi-dashboard/internal/web"
@@ -30,6 +31,7 @@ type Target struct {
 
 // MachineState is the aggregated view of one machine.
 type MachineState struct {
+	Projects       *projects.Snapshot      `json:"projects,omitempty"`
 	Sources        []sessions.SourceHealth `json:"sources,omitempty"`
 	Name           string                  `json:"name"`
 	URL            string                  `json:"url"`
@@ -45,6 +47,7 @@ type MachineState struct {
 
 // FleetSnapshot is the dashboard-facing aggregation of all machines.
 type FleetSnapshot struct {
+	Projects       projects.View    `json:"projects"`
 	GeneratedAt    time.Time        `json:"generatedAt"`
 	Machines       []MachineState   `json:"machines"`
 	HermesSessions []hermes.Session `json:"hermesSessions"`
@@ -153,6 +156,7 @@ func (s *Server) poll(ctx context.Context) {
 			defer wg.Done()
 			state := s.fetch(ctx, t)
 			state.Herdr = s.fetchHerdr(ctx, t)
+			state.Projects = s.fetchProjects(ctx, t)
 			state.TerminalURL = t.TerminalURL
 			s.mu.Lock()
 			s.cache[t.Name] = state
@@ -250,6 +254,14 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 	})
+	mux.HandleFunc("GET /assets/projects.js", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+		_, _ = w.Write(web.ProjectsJS)
+	})
+	mux.HandleFunc("GET /assets/projects.css", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/css; charset=utf-8")
+		_, _ = w.Write(web.ProjectsCSS)
+	})
 	mux.HandleFunc("GET /assets/herdr.js", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-store")
@@ -305,7 +317,12 @@ func (s *Server) cachedFleet() FleetSnapshot {
 		machines = append(machines, state)
 	}
 	hermesSnapshot := hermes.Default().Snapshot(20)
+	projectMachines := make([]projects.Machine, 0, len(machines))
+	for _, m := range machines {
+		projectMachines = append(projectMachines, projects.Machine{Name: m.Name, Online: m.Online, Snapshot: m.Projects})
+	}
 	return FleetSnapshot{
+		Projects:       projects.Merge(projectMachines),
 		GeneratedAt:    time.Now(),
 		Machines:       machines,
 		HermesSessions: hermesSnapshot.Sessions,
@@ -394,4 +411,32 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 	w.WriteHeader(status)
 	enc := json.NewEncoder(w)
 	_ = enc.Encode(payload)
+}
+
+func (s *Server) fetchProjects(ctx context.Context, t Target) *projects.Snapshot {
+	c, cancel := context.WithTimeout(ctx, s.timeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(c, http.MethodGet, strings.TrimRight(t.URL, "/")+"/projects", nil)
+	message := "projects endpoint unavailable; update agent or check machine connection"
+	if err == nil {
+		resp, e := http.DefaultClient.Do(req)
+		if e == nil {
+			defer resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				var snap projects.Snapshot
+				if json.NewDecoder(io.LimitReader(resp.Body, 16<<20)).Decode(&snap) == nil && snap.Results != nil {
+					return &snap
+				}
+			}
+		}
+	}
+	s.mu.Lock()
+	previous := s.cache[t.Name].Projects
+	s.mu.Unlock()
+	snap := projects.Snapshot{Error: message, Results: []projects.Result{}}
+	if previous != nil {
+		snap = *previous
+		snap.Error = message
+	}
+	return &snap
 }

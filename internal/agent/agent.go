@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/HemSoft/hs-pi-dashboard/internal/herdr"
+	"github.com/HemSoft/hs-pi-dashboard/internal/projects"
 	"github.com/HemSoft/hs-pi-dashboard/internal/sessions"
 	"github.com/HemSoft/hs-pi-dashboard/internal/t3"
 	"github.com/HemSoft/hs-pi-dashboard/internal/usage"
@@ -18,6 +19,8 @@ import (
 
 // Options configures one agent.
 type Options struct {
+	ProjectPaths []string
+	ProjectsPoll time.Duration
 	T3Binary     string        // installed T3 CLI for scoped local pairing; empty = discover t3
 	T3DBs        []string      // T3 environment databases; nil uses ~/.t3/userdata/state.sqlite, "off" disables
 	Addr         string        // listen address, e.g. 100.101.122.39:8787
@@ -33,6 +36,12 @@ type Options struct {
 func Run(opts Options) error {
 	usageStore := usage.NewStore(usage.New(), opts.Machine, usagePollInterval(opts.UsagePoll))
 	mux := http.NewServeMux()
+	projectStore := projects.New(opts.ProjectPaths, opts.ProjectsPoll)
+	go projectStore.Start(context.Background())
+	mux.HandleFunc("GET /projects", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		writeJSON(w, http.StatusOK, projectStore.Snapshot())
+	})
 	live := herdr.New(opts.HerdrBinary)
 	go live.Start(context.Background())
 	mux.HandleFunc("GET /herdr", func(w http.ResponseWriter, r *http.Request) {
