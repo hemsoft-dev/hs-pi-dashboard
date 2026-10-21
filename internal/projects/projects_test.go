@@ -198,3 +198,15 @@ func TestSlowSweepWaitsFullIntervalBeforeNextSweep(t *testing.T) {
 		t.Fatal("next sweep never started")
 	}
 }
+
+func TestCancelledDisabledCollectorDoesNotPublishFreshness(t *testing.T) {
+	for _, paths := range [][]string{nil, {"off"}, {" "}} {
+		s := New(paths, 0)
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		s.refresh(ctx)
+		if !s.Snapshot().GeneratedAt.IsZero() {
+			t.Fatalf("cancelled disabled collector published freshness for %#v", paths)
+		}
+	}
+}

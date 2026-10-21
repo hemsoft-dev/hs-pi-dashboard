@@ -179,7 +179,11 @@ func (s *Store) refresh(ctx context.Context) {
 		results[i] = r
 	}
 	s.mu.Lock()
-	s.snapshot = Snapshot{GeneratedAt: time.Now(), Results: results}
+	// Cancellation can also happen with no configured paths or while waiting
+	// to publish the completed sweep. Keep the prior snapshot in that case.
+	if ctx.Err() == nil {
+		s.snapshot = Snapshot{GeneratedAt: time.Now(), Results: results}
+	}
 	s.mu.Unlock()
 }
 
