@@ -16,6 +16,7 @@ import (
 
 	"github.com/HemSoft/hs-pi-dashboard/internal/agent"
 	"github.com/HemSoft/hs-pi-dashboard/internal/fleet"
+	"github.com/HemSoft/hs-pi-dashboard/internal/projects"
 )
 
 const version = "0.2.0"
@@ -74,7 +75,7 @@ Agent flags:
   -machine string       label reported in the snapshot (default hostname)
   -active-window dur    how long a quiet session counts as active (default 2m)
   -project-path string local checkout; repeat for multiple, off disables
-  -projects-poll dur   project refresh interval (default 2m)
+  -projects-poll dur   project refresh interval (default 30m, minimum 15m)
   -herdr-bin string     installed Herdr executable (default auto-discover)
 
 Serve flags:
@@ -91,8 +92,8 @@ func runAgent(args []string) error {
 	dir := fs.String("dir", "", "pi sessions dir (default ~/.pi/agent/sessions)")
 	claudeDir := fs.String("claude-dir", "", "Claude Code projects dir (default ~/.claude/projects)")
 	var projectPaths []string
-	fs.Func("project-path", "local checkout; repeat, off disables; default ~/github discovery", func(path string) error { projectPaths = append(projectPaths, path); return nil })
-	projectsPoll := fs.Duration("projects-poll", 2*time.Minute, "project refresh interval")
+	fs.Func("project-path", "local checkout; repeat, off disables; disabled by default", func(path string) error { projectPaths = append(projectPaths, path); return nil })
+	projectsPoll := fs.Duration("projects-poll", projects.DefaultPollInterval, "project refresh interval (minimum 15m)")
 	var t3DBs []string
 	fs.Func("t3-db", "T3 SQLite database; repeat for multiple environments, off disables", func(path string) error {
 		t3DBs = append(t3DBs, path)

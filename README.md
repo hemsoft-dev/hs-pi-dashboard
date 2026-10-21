@@ -373,14 +373,21 @@ under the service account. Service processes resolve `gh` from PATH and common
 native install locations, including `/opt/homebrew/bin/gh` under launchd. Set
 `HS_PI_DASHBOARD_GH_BIN=/absolute/path/to/gh` to select another installation.
 Each agent runs only its own configured checkouts,
-with three workers, a 45-second deadline per checkout, an 8 MiB output limit,
-and a two-minute refresh. HTTP requests never launch scans.
+serially, with a 45-second deadline per checkout and an 8 MiB output limit.
+The default refresh is 30 minutes, with a minimum of 15 minutes. A new sweep
+waits the full interval after the previous sweep completes. HTTP requests
+never launch scans.
 
-Repeat `-project-path /absolute/checkout` for an explicit list; `-project-path off`
-disables it. Without flags, discover primary repositories immediately under
-`~/github` and `~/github/<owner>`, falling back to the working directory. Linked
-worktrees are represented by gh-x health, rather than scanned independently.
-Use `-projects-poll 5m` to change refresh cadence. No shell or GitHub status
+Projects is **off by default**. Repeat `-project-path /absolute/checkout` for a
+short explicit list of active repositories; `-project-path off` disables it.
+Unset, empty and whitespace-only lists never discover repositories or fall
+back to the working directory. Linked worktrees are represented by gh-x health,
+rather than scanned independently. Use `-projects-poll 30m` to select a cadence;
+shorter than 15m is clamped to 15m. Budget the list across all agents sharing an
+account: 12 repositories at 30m means at most about 24 status runs per hour,
+and each run can make multiple GitHub requests. Use the native
+ProjectDashboard repository list rather than every checkout under `~/github`.
+No shell or GitHub status
 policy is reproduced by the dashboard. It preserves gh-x clean booleans and
 review/check verdict strings, including unknown values.
 

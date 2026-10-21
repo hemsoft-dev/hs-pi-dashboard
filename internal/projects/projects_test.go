@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -57,7 +58,7 @@ func TestBoundedCollectionAndCacheRecovery(t *testing.T) {
 	}
 	s.refresh(context.Background())
 	initial := s.Snapshot()
-	if maxLive.Load() > 3 || len(initial.Results) != 5 || initial.Results[0].Document == nil {
+	if maxLive.Load() != 1 || len(initial.Results) != 5 || initial.Results[0].Document == nil {
 		t.Fatal("unbounded or missing collection", maxLive.Load())
 	}
 	s.run = func(context.Context, string) ([]byte, error) { return nil, errors.New("token=SECRET") }
@@ -97,5 +98,115 @@ func TestOffAndLimit(t *testing.T) {
 	b := limitedBuffer{}
 	if _, e := b.Write(make([]byte, (8<<20)+1)); e == nil {
 		t.Fatal("unbounded output")
+	}
+}
+
+func TestUnsetAndEmptyPathsNeverDiscoverOrRun(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	if err := os.MkdirAll(filepath.Join(home, "github", "owner", "active", ".git"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	for _, paths := range [][]string{nil, {}, {""}, {" ", "\t"}, {"off"}, {"active", " off "}} {
+		s := New(paths, 0)
+		s.run = func(context.Context, string) ([]byte, error) {
+			t.Fatal("disabled collector invoked gh-x")
+			return nil, nil
+		}
+		s.refresh(context.Background())
+		if len(s.paths) != 0 || len(s.Snapshot().Results) != 0 {
+			t.Fatalf("discovered repositories for %#v", paths)
+		}
+	}
+}
+
+func TestPollingBudget(t *testing.T) {
+	for _, tc := range []struct{ given, want time.Duration }{
+		{0, 30 * time.Minute}, {-time.Second, 30 * time.Minute}, {5 * time.Minute, 15 * time.Minute}, {15 * time.Minute, 15 * time.Minute}, {time.Hour, time.Hour},
+	} {
+		if got := New(nil, tc.given).every; got != tc.want {
+			t.Fatalf("poll %s became %s, want %s", tc.given, got, tc.want)
+		}
+	}
+}
+
+func TestCancellationDoesNotLaunchRemainingRepositoriesOrPublishFreshness(t *testing.T) {
+	s := New([]string{"a", "b", "c"}, 0)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	calls := 0
+	s.run = func(context.Context, string) ([]byte, error) { calls++; cancel(); return fixture(t), nil }
+	s.refresh(ctx)
+	if calls != 1 || !s.Snapshot().GeneratedAt.IsZero() {
+		t.Fatalf("cancelled sweep: calls=%d snapshot=%+v", calls, s.Snapshot())
+	}
+	s.refresh(ctx)
+	if calls != 1 {
+		t.Fatal("cancelled context launched another process")
+	}
+}
+
+func TestSlowSweepWaitsFullIntervalBeforeNextSweep(t *testing.T) {
+	s := New([]string{"a"}, 0)
+	s.every = 80 * time.Millisecond
+	data := fixture(t)
+	calls := make(chan int, 4)
+	release := make(chan struct{})
+	var n int
+	s.run = func(ctx context.Context, _ string) ([]byte, error) {
+		n++
+		calls <- n
+		if n == 2 {
+			select {
+			case <-release:
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+		return data, nil
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { defer close(done); s.Start(ctx) }()
+	defer func() { cancel(); <-done }()
+	for expected := 1; expected <= 2; expected++ {
+		select {
+		case got := <-calls:
+			if got != expected {
+				t.Fatal(got)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("sweep did not start")
+		}
+	}
+	// Let the second sweep overrun a polling interval. A ticker would have a
+	// queued tick ready as soon as this sweep finishes.
+	time.Sleep(2 * s.every)
+	close(release)
+	select {
+	case <-calls:
+		t.Fatal("slow sweep caused an immediate catch-up sweep")
+	case <-time.After(s.every / 2):
+	}
+	select {
+	case got := <-calls:
+		if got != 3 {
+			t.Fatal(got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("next sweep never started")
+	}
+}
+
+func TestCancelledDisabledCollectorDoesNotPublishFreshness(t *testing.T) {
+	for _, paths := range [][]string{nil, {"off"}, {" "}} {
+		s := New(paths, 0)
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		s.refresh(ctx)
+		if !s.Snapshot().GeneratedAt.IsZero() {
+			t.Fatalf("cancelled disabled collector published freshness for %#v", paths)
+		}
 	}
 }

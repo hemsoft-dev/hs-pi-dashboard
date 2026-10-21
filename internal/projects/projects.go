@@ -9,10 +9,10 @@ import (
 	"errors"
 	"github.com/HemSoft/hs-pi-dashboard/internal/githubcli"
 	"io"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -82,27 +82,9 @@ type Snapshot struct {
 	Results     []Result  `json:"results"`
 }
 
-// DefaultPaths discovers primary checkouts in ~/github/<repo> or ~/github/<owner>/<repo>.
-// It never recursively walks source/dependency trees or includes linked worktrees.
-func DefaultPaths() []string {
-	home, _ := os.UserHomeDir()
-	var paths []string
-	for _, pattern := range []string{filepath.Join(home, "github", "*", ".git"), filepath.Join(home, "github", "*", "*", ".git")} {
-		matches, _ := filepath.Glob(pattern)
-		for _, match := range matches {
-			if st, err := os.Stat(match); err == nil && st.IsDir() {
-				paths = append(paths, filepath.Dir(match))
-			}
-		}
-	}
-	if len(paths) == 0 {
-		if cwd, err := os.Getwd(); err == nil {
-			paths = append(paths, cwd)
-		}
-	}
-	sort.Strings(paths)
-	return paths
-}
+// Project polling shares the user's GitHub quota with every other session.
+const DefaultPollInterval = 30 * time.Minute
+const MinPollInterval = 15 * time.Minute
 
 type Runner func(context.Context, string) ([]byte, error)
 type Store struct {
@@ -114,21 +96,25 @@ type Store struct {
 }
 
 func New(paths []string, every time.Duration) *Store {
-	if len(paths) == 0 {
-		paths = DefaultPaths()
-	}
 	for _, path := range paths {
-		if path == "off" {
+		if strings.TrimSpace(path) == "off" {
 			paths = nil
 			break
 		}
 	}
 	if every <= 0 {
-		every = 2 * time.Minute
+		every = DefaultPollInterval
+	}
+	if every < MinPollInterval {
+		every = MinPollInterval
 	}
 	seen := map[string]bool{}
 	unique := []string{}
 	for _, p := range paths {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
 		p = filepath.Clean(p)
 		if !seen[p] {
 			unique = append(unique, p)
@@ -144,14 +130,17 @@ func New(paths []string, every time.Duration) *Store {
 }
 func (s *Store) Start(ctx context.Context) {
 	s.refresh(ctx)
-	ticker := time.NewTicker(s.every)
-	defer ticker.Stop()
+	// Wait a full interval after collection finishes. A slow sweep must not
+	// queue another immediate sweep as a ticker would.
+	timer := time.NewTimer(s.every)
+	defer timer.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
+		case <-timer.C:
 			s.refresh(ctx)
+			timer.Reset(s.every)
 		}
 	}
 }
@@ -163,40 +152,38 @@ func (s *Store) refresh(ctx context.Context) {
 		previous[r.Path] = r.Document
 	}
 	results := make([]Result, len(s.paths))
-	jobs := make(chan int)
-	var wg sync.WaitGroup
-	for n := 0; n < min(3, len(s.paths)); n++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for i := range jobs {
-				p := s.paths[i]
-				r := Result{Path: p, AttemptedAt: time.Now()}
-				c, cancel := context.WithTimeout(ctx, 45*time.Second)
-				data, err := s.run(c, p)
-				cancel()
-				if err != nil {
-					r.Error = "gh x status --json failed; check gh-x installation, checkout and host authentication"
-				} else {
-					r.Document, err = Parse(data)
-					if err != nil {
-						r.Error = err.Error()
-					}
-				}
-				if r.Error != "" {
-					r.Document = previous[p]
-				}
-				results[i] = r
+	// Keep at most one gh-x process running on this agent. Each process can
+	// make several GitHub requests; a worker pool multiplies that burst.
+	for i, p := range s.paths {
+		if ctx.Err() != nil {
+			return
+		}
+		r := Result{Path: p, AttemptedAt: time.Now()}
+		c, cancel := context.WithTimeout(ctx, 45*time.Second)
+		data, err := s.run(c, p)
+		cancel()
+		if ctx.Err() != nil {
+			return
+		}
+		if err != nil {
+			r.Error = "gh x status --json failed; check gh-x installation, checkout and host authentication"
+		} else {
+			r.Document, err = Parse(data)
+			if err != nil {
+				r.Error = err.Error()
 			}
-		}()
+		}
+		if r.Error != "" {
+			r.Document = previous[p]
+		}
+		results[i] = r
 	}
-	for i := range s.paths {
-		jobs <- i
-	}
-	close(jobs)
-	wg.Wait()
 	s.mu.Lock()
-	s.snapshot = Snapshot{GeneratedAt: time.Now(), Results: results}
+	// Cancellation can also happen with no configured paths or while waiting
+	// to publish the completed sweep. Keep the prior snapshot in that case.
+	if ctx.Err() == nil {
+		s.snapshot = Snapshot{GeneratedAt: time.Now(), Results: results}
+	}
 	s.mu.Unlock()
 }
 
