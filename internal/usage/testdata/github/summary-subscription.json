@@ -14,7 +14,7 @@
       "grossAmount": 0.5,
       "discountAmount": 0,
       "netAmount": 0.5,
-      "pricePerUnit": 19.0,
+      "pricePerUnit": 0.5,
       "unitType": "user-months"
     }
   ]
