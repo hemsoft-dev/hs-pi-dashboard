@@ -27,3 +27,15 @@ test('expected Business seats show configured disabled protection without a fals
  const unexpected=view.render({...card,billing:{...b,creditNetUsd:1,attention:true}});
  assert.ok(unexpected.includes('Attention'));assert.ok(unexpected.includes('unexpected Copilot usage charges'));
 });
+
+
+test('seat charges cannot hide a newer AI-credit net or gross report',()=>{
+ for(const creditNetUsd of [1,0]) {
+  const b={...billing,creditNetUsd,creditGrossUsd:2,netUsd:19,grossUsd:19,attention:creditNetUsd>0,products:[{product:'Copilot',netUsd:19,grossUsd:19,seatNetUsd:19,usageNetUsd:0,usageGrossUsd:0,hasStopBudget:false,attention:false}]};
+  const html=view.render({...card,billing:b});
+  assert.ok(html.includes('AI-credit report is ahead of the usage summary'));
+  assert.ok(html.includes('$19.00</b> net in usage summary'));
+  const note=html.match(/<p class="([^"]+)">AI-credit report is ahead/);
+  assert.equal(note[1],creditNetUsd?'ubilling-error':'ubilling-note');
+ }
+});

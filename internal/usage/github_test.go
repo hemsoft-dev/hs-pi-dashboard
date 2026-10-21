@@ -306,7 +306,7 @@ func TestGitHubCooldownSuppressesRequestsUntilRetryDeadline(t *testing.T) {
 
 func TestGitHubIncludesExpectedSubscriptionWithoutUsageAlert(t *testing.T) {
 	b, err := parseBilling(report("Copilot", 0, 0, 0), billingFixture(t, "summary-subscription"), nil, "example-org", billingNow)
-	if err != nil || b.NetUSD != .5 || b.GrossUSD != .5 || b.CreditNetUSD != 0 || b.CreditGrossUSD != 0 || b.Credits != 0 || b.Attention || len(b.Products) != 1 || b.Products[0].Product != "Copilot" || b.Products[0].NetUSD != .5 || b.Products[0].GrossUSD != .5 || b.Products[0].HasStopBudget || b.Products[0].Attention || b.Products[0].SeatNetUSD != .5 || b.Products[0].UsageNetUSD != 0 {
+	if err != nil || b.NetUSD != .5 || b.GrossUSD != .5 || b.CreditNetUSD != 0 || b.CreditGrossUSD != 0 || b.Credits != 0 || b.Attention || len(b.Products) != 1 || b.Products[0].Product != "Copilot" || b.Products[0].NetUSD != .5 || b.Products[0].GrossUSD != .5 || b.Products[0].HasStopBudget || b.Products[0].Attention || b.Products[0].SeatNetUSD != .5 || b.Products[0].UsageNetUSD != 0 || b.Products[0].UsageGrossUSD != 0 {
 		t.Fatal("subscription summary row lost or conflated with AI credits", b, err)
 	}
 }
@@ -316,7 +316,7 @@ func TestGitHubSeatExceptionDoesNotHideUsage(t *testing.T) {
 	for _, sku := range []string{"copilot_premium_requests", "", "new_unknown_sku"} {
 		data := []byte(strings.Replace(string(seat), "copilot_for_business", sku, 1))
 		b, err := parseBilling(report("Copilot", 0, 0, 0), data, nil, "example-org", billingNow)
-		if err != nil || !b.Attention || !b.Products[0].Attention || b.Products[0].SeatNetUSD != 0 || b.Products[0].UsageNetUSD != .5 {
+		if err != nil || !b.Attention || !b.Products[0].Attention || b.Products[0].SeatNetUSD != 0 || b.Products[0].UsageNetUSD != .5 || b.Products[0].UsageGrossUSD != .5 {
 			t.Fatal("non-seat SKU did not alert", sku, b, err)
 		}
 	}
@@ -335,7 +335,7 @@ func TestGitHubSeatExceptionDoesNotHideUsage(t *testing.T) {
 		t.Fatal(err)
 	}
 	b, err = parseBilling(report("Copilot", 0, 0, 0), data, nil, "example-org", billingNow)
-	if err != nil || !b.Attention || b.NetUSD != .75 || b.Products[0].SeatNetUSD != .5 || b.Products[0].UsageNetUSD != .25 {
+	if err != nil || !b.Attention || b.NetUSD != .75 || b.Products[0].SeatNetUSD != .5 || b.Products[0].UsageNetUSD != .25 || b.Products[0].UsageGrossUSD != .25 {
 		t.Fatal("mixed seats and usage lost classification", b, err)
 	}
 }

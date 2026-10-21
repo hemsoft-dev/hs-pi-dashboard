@@ -43,6 +43,7 @@ type BillingProduct struct {
 	Attention     bool    `json:"attention"`
 	SeatNetUSD    float64 `json:"seatNetUsd"`
 	UsageNetUSD   float64 `json:"usageNetUsd"`
+	UsageGrossUSD float64 `json:"usageGrossUsd"`
 }
 type BillingBudget struct {
 	Products   []string `json:"products"`
@@ -337,6 +338,7 @@ func parseBilling(creditData, summaryData []byte, budgets []BillingBudget, org s
 			p.SeatNetUSD += *v.NetAmount
 		} else {
 			p.UsageNetUSD += *v.NetAmount
+			p.UsageGrossUSD += *v.GrossAmount
 		}
 		b.NetUSD += *v.NetAmount
 		b.GrossUSD += *v.GrossAmount
