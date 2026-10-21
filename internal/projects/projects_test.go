@@ -89,7 +89,7 @@ func TestMergePreservesMachineHealthAndOneHostedView(t *testing.T) {
 	}
 }
 func TestOffAndLimit(t *testing.T) {
-	s := New([]string{"off"}, 0)
+	s := New([]string{"off", "some-checkout"}, 0)
 	s.refresh(context.Background())
 	if len(s.Snapshot().Results) != 0 {
 		t.Fatal("off collected")

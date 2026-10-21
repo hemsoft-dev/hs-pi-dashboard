@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/HemSoft/hs-pi-dashboard/internal/githubcli"
 	"io"
 	"os"
 	"os/exec"
@@ -116,8 +117,11 @@ func New(paths []string, every time.Duration) *Store {
 	if len(paths) == 0 {
 		paths = DefaultPaths()
 	}
-	if len(paths) == 1 && paths[0] == "off" {
-		paths = nil
+	for _, path := range paths {
+		if path == "off" {
+			paths = nil
+			break
+		}
 	}
 	if every <= 0 {
 		every = 2 * time.Minute
@@ -206,7 +210,7 @@ func (b *limitedBuffer) Write(p []byte) (int, error) {
 	return b.Buffer.Write(p)
 }
 func runStatus(ctx context.Context, path string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, "gh", "x", "status", "--json")
+	cmd := exec.CommandContext(ctx, githubcli.Binary(), "x", "status", "--json")
 	cmd.Dir = path
 	cmd.WaitDelay = time.Second
 	var out limitedBuffer

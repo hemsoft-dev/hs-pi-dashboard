@@ -256,10 +256,12 @@ func (s *Server) routes() http.Handler {
 	})
 	mux.HandleFunc("GET /assets/projects.js", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
 		_, _ = w.Write(web.ProjectsJS)
 	})
 	mux.HandleFunc("GET /assets/projects.css", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/css; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
 		_, _ = w.Write(web.ProjectsCSS)
 	})
 	mux.HandleFunc("GET /assets/herdr.js", func(w http.ResponseWriter, r *http.Request) {

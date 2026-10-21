@@ -310,7 +310,10 @@ fleet installation are separate from implementing this collector.
 
 Agents expose cached `GET /projects` snapshots from `gh x status --json`
 (schemaVersion 1, gh-x v0.22.0 or newer). Install gh-x and authenticate gh
-under the service account. Each agent runs only its own configured checkouts,
+under the service account. Service processes resolve `gh` from PATH and common
+native install locations, including `/opt/homebrew/bin/gh` under launchd. Set
+`HS_PI_DASHBOARD_GH_BIN=/absolute/path/to/gh` to select another installation.
+Each agent runs only its own configured checkouts,
 with three workers, a 45-second deadline per checkout, an 8 MiB output limit,
 and a two-minute refresh. HTTP requests never launch scans.
 
