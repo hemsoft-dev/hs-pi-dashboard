@@ -325,7 +325,7 @@ this card without affecting other providers. Each refresh has a 20-second
 budget and each CLI response a 4 MiB limit.
 
 Read-only [GitHub usage APIs](https://docs.github.com/en/rest/billing/usage)
-provide monthly Copilot AI credits and net/gross metered spend by product.
+provide monthly Copilot AI credits and net/gross spend by product.
 The [budgets API](https://docs.github.com/en/rest/billing/budgets) supplies all
 budget pages, up to a safe ten-page limit; an incomplete report is an error.
 Both the live singular `budget_product_sku` and documented plural
@@ -335,9 +335,11 @@ user budgets remain visible without claiming they cover a whole product.
 
 The card shows the UTC billing month, credits, net/gross dollars, each budget's
 amount and stop state, and month-end credits/net-spend projections at the
-month-to-date pace. An empty month is zero. Recurring seat fees are outside the
-metered endpoints and excluded from these totals. Projections are estimates,
-not invoice amounts or spending caps. Positive metered product spend without
+month-to-date pace. An empty month is zero. Summary totals include every reported SKU, including
+subscription SKUs such as `copilot_for_business` when GitHub returns them.
+AI-credit amounts remain a separate report. Projections apply the month-to-date
+pace to all reported summary spend, including subscription charges; they are estimates,
+not invoice amounts or spending caps. Positive reported product spend without
 an applicable product stop budget requires attention. Any Copilot net spend requires
 attention, including spend seen only in the AI-credit report. GitHub does not
 expose the Copilot paid-usage policy through these APIs; absence of a Copilot

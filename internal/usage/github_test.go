@@ -303,3 +303,10 @@ func TestGitHubCooldownSuppressesRequestsUntilRetryDeadline(t *testing.T) {
 		t.Fatal("cooldown did not recover", recovered, count.Load())
 	}
 }
+
+func TestGitHubIncludesSubscriptionSKUsAndFlagsAnyCopilotNet(t *testing.T) {
+	b, err := parseBilling(report("Copilot", 0, 0, 0), billingFixture(t, "summary-subscription"), nil, "example-org", billingNow)
+	if err != nil || b.NetUSD != .5 || b.GrossUSD != .5 || b.CreditNetUSD != 0 || b.Credits != 0 || !b.Attention || len(b.Products) != 1 || b.Products[0].Product != "Copilot" || !b.Products[0].Attention {
+		t.Fatal("subscription summary row lost or conflated with AI credits", b, err)
+	}
+}

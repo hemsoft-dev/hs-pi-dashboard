@@ -19,7 +19,7 @@ import (
 	"time"
 )
 
-// Billing is metered organization usage, not the recurring subscription invoice.
+// Billing preserves organization usage-summary and AI-credit reports separately.
 type Billing struct {
 	Organization     string           `json:"organization"`
 	Month            string           `json:"month"`
