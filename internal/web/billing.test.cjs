@@ -10,3 +10,11 @@ test('cached refresh failures and old readings stay explicit',()=>{
  const html=view.render({...card,error:'API unavailable'});assert.ok(html.includes('Refresh failed · cached'));assert.ok(html.includes('API unavailable'));
  const stale=view.render({...card,fetchedAt:'2020-01-01T00:00:00Z'});assert.ok(stale.includes('Stale reading'));
 });
+
+test('credit report ahead of the summary is shown without rewriting summary money',()=>{
+ const b={...billing,creditNetUsd:1,creditGrossUsd:10,netUsd:0,grossUsd:2,attention:true};
+ const html=view.render({...card,billing:b});
+ assert.ok(html.includes('$0.00</b> net in usage summary'));
+ assert.ok(html.includes('AI-credit report is ahead of the usage summary: Copilot $1.00 net / $10.00 gross'));
+ assert.ok(html.includes('retain the summary API values'));
+});

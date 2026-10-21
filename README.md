@@ -330,7 +330,7 @@ The [budgets API](https://docs.github.com/en/rest/billing/budgets) supplies all
 budget pages, up to a safe ten-page limit; an incomplete report is an error.
 Both the live singular `budget_product_sku` and documented plural
 `budget_product_skus` are accepted. A product counts as covered only by an
-organization-wide ProductPricing budget that stops usage. Repository, SKU or
+organization-wide or applicable enterprise ProductPricing budget that stops usage. Repository, SKU or
 user budgets remain visible without claiming they cover a whole product.
 
 The card shows the UTC billing month, credits, net/gross dollars, each budget's
@@ -338,7 +338,7 @@ amount and stop state, and month-end credits/net-spend projections at the
 month-to-date pace. An empty month is zero. Recurring seat fees are outside the
 metered endpoints and excluded from these totals. Projections are estimates,
 not invoice amounts or spending caps. Positive metered product spend without
-a product stop budget requires attention. Any Copilot net spend requires
+an applicable product stop budget requires attention. Any Copilot net spend requires
 attention, including spend seen only in the AI-credit report. GitHub does not
 expose the Copilot paid-usage policy through these APIs; absence of a Copilot
 budget does not establish whether paid usage is enabled. No policy is inferred
@@ -346,7 +346,11 @@ or changed. API failures keep the last successful reading from the same UTC bill
 with its original timestamp and an explicit cached error. They never reuse a
 previous month as the current month, show a fabricated zero, or hide failed
 quota providers in the collapsed summary. Collection retries on the next normal
-usage refresh.
+usage refresh. Rate-limit responses honor Retry-After and primary reset times,
+with a minimum one-minute cooldown; secondary 403 responses are distinct from
+missing scope. Net/gross product totals and net projections preserve the usage
+summary exactly. If the AI-credit report is ahead, the card highlights its
+separate Copilot dollar amounts without adding overlapping reports together.
 
 ## Projects
 

@@ -994,9 +994,16 @@ function renderUsage(fleet) {
   const inBody = body.contains(focused);
   const focusKey = inBody && focused?.matches(".ucard-toggle") ? { ...focused.dataset } : null;
   const focusFailures = inBody && focused?.matches(".ufail summary");
+  const billingFocus = inBody && focused?.matches(".ubilling-scroll") ? {key:focused.closest(".ubilling").dataset.billingKey,label:focused.getAttribute("aria-label")} : null;
+  const billingScroll = [...body.querySelectorAll(".ubilling-scroll")].map(el=>({key:el.closest(".ubilling").dataset.billingKey,label:el.getAttribute("aria-label"),left:el.scrollLeft}));
   const restoreFocus = () => {
+    for (const position of billingScroll) {
+      const region=[...body.querySelectorAll(".ubilling-scroll")].find(el=>el.closest(".ubilling").dataset.billingKey===position.key && el.getAttribute("aria-label")===position.label);
+      if (region) region.scrollLeft=position.left;
+    }
     let control = null;
-    if (focusFailures) control = body.querySelector(".ufail summary");
+    if (billingFocus) control=[...body.querySelectorAll(".ubilling-scroll")].find(el=>el.closest(".ubilling").dataset.billingKey===billingFocus.key && el.getAttribute("aria-label")===billingFocus.label);
+    else if (focusFailures) control = body.querySelector(".ufail summary");
     else if (focusKey) control = [...body.querySelectorAll(".ucard-toggle")].find((el) => el.dataset.machine === focusKey.machine && el.dataset.key === focusKey.key);
     else return;
     (control || document.getElementById("usage-toggle")).focus({ preventScroll: true });
@@ -1057,7 +1064,7 @@ function renderUsage(fleet) {
   const quotaUnavailable = cards.filter(c => c.kind === "quota" && !c.gauges?.length);
   if (!groups.length && billingCards.length) {
     const billingText = billingAlerts.length ? billingAlerts.map(c => c.label + (c.error ? " unavailable" : " attention")).join(", ")
-      : BillingDashboard.money(billingCards.reduce((n,c) => n + (c.billing?.netUsd || 0),0)) + " GitHub net this month";
+      : BillingDashboard.money(billingCards.reduce((n,c) => n + (c.billing?.netUsd || 0),0)) + " GitHub net in usage summary";
     verdict = { text: [quotaUnavailable.length ? "Quota not reporting: " + quotaUnavailable.map(c => c.label).join(", ") : "", billingText].filter(Boolean).join(" · "),
       status: billingAlerts.length || quotaUnavailable.length ? "risk" : "ok",
       source: [...billingCards.map(c => ({fetchedAt:c.fetchedAt,cardError:c.error,attemptOnly:!c.billing})),

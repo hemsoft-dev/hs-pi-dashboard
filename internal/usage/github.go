@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -52,6 +53,7 @@ type billingResponse struct {
 	Data        []byte
 	Status      int
 	RateLimited bool
+	RetryAt     time.Time
 }
 type billingRunner func(context.Context, string) (billingResponse, error)
 
@@ -67,9 +69,34 @@ func (f *Fetcher) githubBilling(ctx context.Context, org string, now time.Time) 
 	}
 	c, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	run := f.githubRun
-	if run == nil {
-		run = runGitHubBilling
+	f.githubRateMu.Lock()
+	until := f.githubRateUntil[org]
+	f.githubRateMu.Unlock()
+	if until.After(now) {
+		card.Error = "GitHub billing rate limited; retry after the limit resets"
+		return card
+	}
+	rawRun := f.githubRun
+	if rawRun == nil {
+		rawRun = runGitHubBilling
+	}
+	run := func(ctx context.Context, path string) (billingResponse, error) {
+		response, err := rawRun(ctx, path)
+		if response.RateLimited || response.Status == 429 {
+			retry := response.RetryAt
+			if !retry.After(now) {
+				retry = now.Add(time.Minute)
+			}
+			f.githubRateMu.Lock()
+			if f.githubRateUntil == nil {
+				f.githubRateUntil = map[string]time.Time{}
+			}
+			if retry.After(f.githubRateUntil[org]) {
+				f.githubRateUntil[org] = retry
+			}
+			f.githubRateMu.Unlock()
+		}
+		return response, err
 	}
 	query := fmt.Sprintf("?year=%d&month=%d", now.UTC().Year(), now.UTC().Month())
 	base := "/organizations/" + org + "/settings/billing/"
@@ -150,8 +177,39 @@ func runGitHubBilling(ctx context.Context, path string) (billingResponse, error)
 	if e != nil {
 		return billingResponse{}, e
 	}
-	return billingResponse{Data: data, Status: response.StatusCode, RateLimited: response.StatusCode == 403 && response.Header.Get("X-RateLimit-Remaining") == "0"}, err
+	limited, until := billingRateLimit(response.StatusCode, response.Header, data, time.Now())
+	return billingResponse{Data: data, Status: response.StatusCode, RateLimited: limited, RetryAt: until}, err
 }
+func billingRateLimit(status int, headers http.Header, data []byte, now time.Time) (bool, time.Time) {
+	var body struct {
+		Message string `json:"message"`
+	}
+	_ = json.Unmarshal(data, &body)
+	message := strings.ToLower(body.Message)
+	limited := status == 429 || status == 403 && (headers.Get("X-RateLimit-Remaining") == "0" || headers.Get("Retry-After") != "" || strings.Contains(message, "rate limit") || strings.Contains(message, "abuse detection"))
+	if !limited {
+		return false, time.Time{}
+	}
+	until := now.Add(time.Minute)
+	if seconds, err := strconv.ParseInt(headers.Get("Retry-After"), 10, 64); err == nil && seconds > 0 && seconds <= int64((time.Duration(1<<63-1))/time.Second) {
+		candidate := now.Add(time.Duration(seconds) * time.Second)
+		if candidate.After(until) {
+			until = candidate
+		}
+	} else if stamp, err := http.ParseTime(headers.Get("Retry-After")); err == nil && stamp.After(until) {
+		until = stamp
+	}
+	if headers.Get("X-RateLimit-Remaining") == "0" {
+		if seconds, err := strconv.ParseInt(headers.Get("X-RateLimit-Reset"), 10, 64); err == nil {
+			stamp := time.Unix(seconds, 0)
+			if stamp.After(until) {
+				until = stamp
+			}
+		}
+	}
+	return true, until
+}
+
 func readBudgets(ctx context.Context, run billingRunner, base string) ([]BillingBudget, error) {
 	budgets := []BillingBudget{}
 	for page := 1; page <= 10; page++ {
@@ -268,7 +326,7 @@ func parseBilling(creditData, summaryData []byte, budgets []BillingBudget, org s
 	}
 	for _, p := range byProduct {
 		for _, budget := range budgets {
-			if budget.Type != "ProductPricing" || budget.Scope != "organization" || (budget.Entity != "" && !strings.EqualFold(budget.Entity, org)) || !budget.StopsUsage {
+			if budget.Type != "ProductPricing" || (budget.Scope != "organization" && budget.Scope != "enterprise") || (budget.Scope == "organization" && budget.Entity != "" && !strings.EqualFold(budget.Entity, org)) || !budget.StopsUsage {
 				continue
 			}
 			for _, product := range budget.Products {

@@ -81,8 +81,10 @@ type Fetcher struct {
 	Client *http.Client
 	Home   string // defaults to the current user's home
 
-	githubRun  billingRunner
-	claudeGate claudeRateGate
+	githubRun       billingRunner
+	githubRateMu    sync.Mutex
+	githubRateUntil map[string]time.Time
+	claudeGate      claudeRateGate
 }
 
 // New returns a fetcher with defaults.

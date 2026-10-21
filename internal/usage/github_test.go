@@ -230,3 +230,76 @@ func TestGitHubStoreKeepsSameMonthReadingAndRecovers(t *testing.T) {
 		t.Fatal("previous month retained", failed)
 	}
 }
+
+func TestGitHubKeepsReportsSeparateWithoutDoubleCounting(t *testing.T) {
+	credits := report("Copilot", 10, 1, 100)
+	b, e := parseBilling(credits, report("Actions", 2, 0, 100), nil, "example-org", billingNow)
+	if e != nil || !b.Attention || b.CreditNetUSD != 1 || b.NetUSD != 0 || b.ProjectedNetUSD != 0 || b.GrossUSD != 2 || len(b.Products) != 1 {
+		t.Fatal("report provenance lost", b, e)
+	}
+	b, e = parseBilling(credits, report("Copilot", 10, 1, 100), nil, "example-org", billingNow)
+	if e != nil || b.NetUSD != 1 || b.GrossUSD != 10 || b.ProjectedNetUSD != 2 {
+		t.Fatal("overlapping reports double-counted", b, e)
+	}
+}
+func TestGitHubEnterpriseProductBudgetCoverage(t *testing.T) {
+	for _, tc := range []struct {
+		scope, entity string
+		covered       bool
+	}{{"enterprise", "parent-enterprise", true}, {"organization", "example-org", true}, {"organization", "different-org", false}, {"cost_center", "division", false}, {"repository", "example-org/repo", false}} {
+		budget := BillingBudget{Products: []string{"actions"}, Type: "ProductPricing", Scope: tc.scope, Entity: tc.entity, Amount: 0, StopsUsage: true}
+		b, e := parseBilling(report("Copilot", 0, 0, 0), report("Actions", 2, 1, 100), []BillingBudget{budget}, "example-org", billingNow)
+		if e != nil || b.Products[0].HasStopBudget != tc.covered || b.Attention == tc.covered {
+			t.Fatal(tc, b, e)
+		}
+	}
+}
+func TestGitHubPrimaryAndSecondaryRateLimitSignals(t *testing.T) {
+	for _, tc := range []struct {
+		status                    int
+		remaining, retry, message string
+		limited                   bool
+		delay                     time.Duration
+	}{{403, "0", "", "", true, time.Minute}, {403, "42", "600", "", true, 10 * time.Minute}, {403, "42", "", "You have exceeded a secondary rate limit", true, time.Minute}, {403, "42", "", "Resource not accessible", false, 0}, {404, "42", "600", "not found", false, 0}, {429, "42", "", "", true, time.Minute}} {
+		h := http.Header{}
+		h.Set("X-RateLimit-Remaining", tc.remaining)
+		h.Set("Retry-After", tc.retry)
+		body, _ := json.Marshal(map[string]string{"message": tc.message})
+		limited, until := billingRateLimit(tc.status, h, body, billingNow)
+		if limited != tc.limited || limited && until.Sub(billingNow) != tc.delay {
+			t.Fatal(tc, limited, until)
+		}
+	}
+	h := http.Header{}
+	h.Set("X-RateLimit-Remaining", "0")
+	h.Set("X-RateLimit-Reset", fmt.Sprint(billingNow.Add(time.Hour).Unix()))
+	if limited, until := billingRateLimit(403, h, nil, billingNow); !limited || until.Sub(billingNow) != time.Hour {
+		t.Fatal("reset deadline ignored", until)
+	}
+}
+func TestGitHubCooldownSuppressesRequestsUntilRetryDeadline(t *testing.T) {
+	var count atomic.Int32
+	var limited atomic.Bool
+	limited.Store(true)
+	good := billingFake(t)
+	f := &Fetcher{githubRun: func(ctx context.Context, path string) (billingResponse, error) {
+		count.Add(1)
+		if limited.Load() {
+			return billingResponse{Status: 403, RateLimited: true, RetryAt: billingNow.Add(10 * time.Minute)}, errors.New("limited")
+		}
+		return good(ctx, path)
+	}}
+	first := f.githubBilling(context.Background(), "example-org", billingNow)
+	if !strings.Contains(first.Error, "rate limited") || count.Load() != 3 {
+		t.Fatal(first, count.Load())
+	}
+	limited.Store(false)
+	blocked := f.githubBilling(context.Background(), "example-org", billingNow.Add(time.Minute))
+	if !strings.Contains(blocked.Error, "rate limited") || count.Load() != 3 {
+		t.Fatal("request during cooldown", blocked, count.Load())
+	}
+	recovered := f.githubBilling(context.Background(), "example-org", billingNow.Add(11*time.Minute))
+	if recovered.Error != "" || recovered.Billing == nil || count.Load() != 6 {
+		t.Fatal("cooldown did not recover", recovered, count.Load())
+	}
+}
