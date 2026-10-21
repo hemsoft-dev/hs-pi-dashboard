@@ -15,6 +15,7 @@ function renderer(storage = new Map()) {
     'usage-provider-note': { textContent: '' },
   };
   const r = vm.createContext({
+    BillingDashboard: require("../internal/web/billing.js"),
     localStorage: { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) },
     document: { activeElement: null, getElementById: id => nodes[id] },
     esc: s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])),
@@ -340,4 +341,17 @@ test('malformed preferences use defaults and storage failure still permits chang
   r.renderUsage({ machines: [{ usage: { cards: [card({ key: 'claude', label: 'Claude' })] } }] });
   assert.match(body.innerHTML, />Claude</);
   assert.match(options.innerHTML, /data-usage-provider="claude" checked/);
+});
+
+
+test('billing provider selection filters alerts before the shared header and preserves quota data', () => {
+ const {r,body,summary}=renderer();
+ const billing={key:'github-billing:example-org',label:'GitHub (example-org)',kind:'billing',error:'admin:org required',fetchedAt:new Date().toISOString()};
+ const fleet={machines:[{name:'mini',online:true,usage:{cards:[card(),billing]}}]};
+ r.lastFleet=fleet;r.renderUsage(fleet);
+ assert.match(body.innerHTML,/ubilling/);assert.match(summary.innerHTML,/GitHub.*unavailable/);
+ r.setUsageProvider(billing.key,false);
+ assert.doesNotMatch(body.innerHTML,/ubilling/);assert.doesNotMatch(summary.innerHTML,/GitHub/);assert.match(body.innerHTML,/Codex/);
+ r.setUsageProvider(billing.key,true);
+ assert.match(body.innerHTML,/admin:org required/);
 });

@@ -30,3 +30,11 @@ var ProjectsJS []byte
 
 //go:embed projects.css
 var ProjectsCSS []byte
+
+// BillingJS and BillingCSS render metered organization billing.
+//
+//go:embed billing.js
+var BillingJS []byte
+
+//go:embed billing.css
+var BillingCSS []byte

@@ -7,6 +7,8 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 128 128'%3E%3Crect width='128' height='128' rx='28' fill='%23050505'/%3E%3Crect x='2' y='2' width='124' height='124' rx='26' fill='none' stroke='%23262626' stroke-width='4'/%3E%3Cpath d='M28 38 54 64 28 90' fill='none' stroke='%23ffd700' stroke-width='14' stroke-linecap='round' stroke-linejoin='round'/%3E%3Crect x='66' y='31' width='30' height='14' rx='7' fill='%23b89b23'/%3E%3Crect x='66' y='57' width='40' height='14' rx='7' fill='%23b89b23'/%3E%3Crect x='66' y='83' width='34' height='14' rx='7' fill='%23ffd700'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="/assets/herdr.css">
 <link rel="stylesheet" href="/assets/projects.css">
+<link rel="stylesheet" href="/assets/billing.css">
+<script src="/assets/billing.js"></script>
 <script src="/assets/projects.js"></script>
 <style>
   :root {
@@ -579,7 +581,7 @@ function failureText(card) {
   return card.kind === "balance" ? "no balance reported" : "no usage windows reported";
 }
 function hasUsageData(card) {
-  return (card.kind === "quota" && card.gauges?.length > 0) || (card.kind === "balance" && Number.isFinite(card.balanceUsd));
+  return (card.kind === "billing" && !!card.billing) || (card.kind === "quota" && card.gauges?.length > 0) || (card.kind === "balance" && Number.isFinite(card.balanceUsd));
 }
 // Section verdict: the window that runs out first, so the answer stays
 // visible even with the section collapsed.
@@ -1040,16 +1042,25 @@ function renderUsage(fleet) {
     .filter((c) => c.kind === "quota" && c.gauges?.length)
     .map((c) => ({ card: c, windows: c.gauges.map((g) => windowState(g, c.label, c.fetchedAt, c.error)).sort(compareUrgency) }))
     .sort((a, b) => compareUrgency(a.windows[0], b.windows[0]));
+  const billingCards = cards.filter((c) => c.kind === "billing");
   const balances = cards.filter((c) => c.kind === "balance" && Number.isFinite(c.balanceUsd));
   // A provider the user switched on that no agent reports (for example, Claude
   // with agents older than the dashboard) is listed as not reporting, so
   // checking it never appears to do nothing.
   const absent = catalog.filter((p) => usageProviderPreferences[p.key] === true && !byKey.has(p.key))
     .map((p) => ({ key: p.key, label: p.label, absent: true }));
-  const missing = [...cards.filter((c) => !hasUsageData(c)), ...absent];
-  const refreshFailing = cards.filter((c) => hasUsageData(c) && c.error);
+  const missing = [...cards.filter((c) => c.kind !== "billing" && !hasUsageData(c)), ...absent];
+  const refreshFailing = cards.filter((c) => c.kind !== "billing" && hasUsageData(c) && c.error);
 
-  const verdict = usageVerdict(groups.flatMap((g) => g.windows).sort(compareUrgency));
+  let verdict = usageVerdict(groups.flatMap((g) => g.windows).sort(compareUrgency));
+  const billingAlerts = billingCards.filter((c) => c.error || c.billing?.attention);
+  if (!groups.length && billingCards.length) {
+    verdict = { text: billingAlerts.length ? billingAlerts.map(c => c.label + (c.error ? " unavailable" : " attention")).join(", ")
+      : BillingDashboard.money(billingCards.reduce((n,c) => n + (c.billing?.netUsd || 0),0)) + " GitHub net this month",
+      status: billingAlerts.length ? "risk" : "ok", source: billingCards.map(c => ({fetchedAt:c.fetchedAt,cardError:c.error,attemptOnly:!c.billing})) };
+  } else if (billingAlerts.length) {
+    verdict.more = [verdict.more, ...billingAlerts.map(c => c.label + (c.error ? " unavailable" : " attention"))].filter(Boolean).join(" · ");
+  }
   // With no quota windows at all, the verdict is about the quota cards, never a balance's timestamp.
   const quotaAttempts = cards.filter((c) => c.kind === "quota").map((c) => ({ fetchedAt: c.fetchedAt, cardError: c.error, attemptOnly: true }));
   summary.innerHTML = `<span class="uverdict s-${verdict.status}">${esc(verdict.text)}`
@@ -1063,7 +1074,7 @@ function renderUsage(fleet) {
     ? (groups.some((g) => !cardCollapsed("global", g.card.key)) ? columns : "")
       + `<ul class="ugroups">${groups.map((g, i) => quotaGroup(g.card, g.windows,
         i === 0 && ["out", "risk", "tight"].includes(g.windows[0].status))).join("")}</ul>`
-    : '<p class="uempty">no quota windows reported</p>';
+    : (billingCards.length ? "" : '<p class="uempty">no quota windows reported</p>');
   const balanceList = balances.length
     ? `<div class="ubals"><h3>Prepaid balances</h3><ul>${balances.map((c) =>
         `<li><span>${esc(c.label)}</span><span class="uamount">$${c.balanceUsd.toFixed(2)}</span>${noteHtml(c)}</li>`).join("")}</ul></div>`
@@ -1077,7 +1088,7 @@ function renderUsage(fleet) {
         `<li><b>${esc(c.label)}</b> ${hasUsageData(c) ? "refresh failed, showing cached values" : failureText(c)}`
         + `${c.error ? ` <code>(${esc(c.error)})</code>` : ""}</li>`).join("")}</ul></details>`
     : "";
-  body.innerHTML = `<div class="uboard">${board}${balanceList}${failures}</div>`;
+  body.innerHTML = `<div class="uboard">${board}${balanceList}${billingCards.map(c => BillingDashboard.render(c)).join("")}${failures}</div>`;
   restoreFocus();
 }
 

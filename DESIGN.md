@@ -400,3 +400,13 @@ local health followed by one set of GitHub tables. Coral marks unavailable or
 attention health; producer verdict words remain visible. Tables scroll within
 the panel on phones, with focusable labeled scroll regions. Expansion and focus
 survive polling; the section preference is browser-local.
+
+## GitHub billing
+
+The GitHub organization card sits inside Usage & Balances using its existing
+gold figures, muted timestamps, tabular monospace values and hairline tables.
+The lead row pairs measured credits and net dollars with their month-end
+projections. Product spend and budget tables retain scope and stop-state words.
+Ember identifies billing attention or collection errors. The paid-usage policy
+limitation stays visible. Tables scroll within labeled keyboard-focusable regions
+on phones; provider selection removes the card and its alerts together.

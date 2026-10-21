@@ -306,6 +306,45 @@ Check each agent's `/sessions` source health and the dashboard's `/api/fleet` pa
 The dashboard can be opened in T3's browser panel as an ordinary page. Merge and
 fleet installation are separate from implementing this collector.
 
+## GitHub organization billing
+
+Set `GITHUB_BILLING_ORG=hemsoft-dev` in the agent service environment to add a
+GitHub card to Usage & Balances. It appears automatically in Choose providers,
+with the same browser-local selection behavior. Configure it on one agent for
+each organization; reports from multiple agents for the same org deduplicate,
+while different organizations keep separate cards.
+
+The collector runs the installed GitHub CLI, using the existing `GH_TOKEN`,
+`GITHUB_TOKEN` or stored gh account configuration. It never starts a login,
+reads a token into dashboard data, or changes an account or billing setting.
+Use an org owner account with `admin:org` for a classic token, or the equivalent
+organization Administration read permission. Services use the same home and gh
+configuration as that account. `HS_PI_DASHBOARD_GH_BIN` also applies to billing.
+Missing access, rate limits, unavailable gh/API and invalid responses appear on
+this card without affecting other providers. Each refresh has a 20-second
+budget and each CLI response a 4 MiB limit.
+
+Read-only [GitHub usage APIs](https://docs.github.com/en/rest/billing/usage)
+provide monthly Copilot AI credits and net/gross metered spend by product.
+The [budgets API](https://docs.github.com/en/rest/billing/budgets) supplies all
+budget pages, up to a safe ten-page limit; an incomplete report is an error.
+Both the live singular `budget_product_sku` and documented plural
+`budget_product_skus` are accepted. A product counts as covered only by an
+organization-wide ProductPricing budget that stops usage. Repository, SKU or
+user budgets remain visible without claiming they cover a whole product.
+
+The card shows the UTC billing month, credits, net/gross dollars, each budget's
+amount and stop state, and month-end credits/net-spend projections at the
+month-to-date pace. An empty month is zero. Recurring seat fees are outside the
+metered endpoints and excluded from these totals. Projections are estimates,
+not invoice amounts or spending caps. Positive metered product spend without
+a product stop budget requires attention. Any Copilot net spend requires
+attention, including spend seen only in the AI-credit report. GitHub does not
+expose the Copilot paid-usage policy through these APIs; absence of a Copilot
+budget does not establish whether paid usage is enabled. No policy is inferred
+or changed. API failures show no fabricated zero and retry on the next normal
+usage refresh.
+
 ## Projects
 
 Agents expose cached `GET /projects` snapshots from `gh x status --json`

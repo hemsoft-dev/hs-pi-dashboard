@@ -49,6 +49,7 @@ type Gauge struct {
 
 // Card is one provider's dashboard card.
 type Card struct {
+	Billing    *Billing  `json:"billing,omitempty"`
 	Key        string    `json:"key"`
 	Label      string    `json:"label"`
 	Kind       string    `json:"kind"`
@@ -80,6 +81,7 @@ type Fetcher struct {
 	Client *http.Client
 	Home   string // defaults to the current user's home
 
+	githubRun  billingRunner
 	claudeGate claudeRateGate
 }
 
@@ -176,6 +178,9 @@ func (s *Store) Snapshot() Snapshot {
 func (f *Fetcher) FetchAll(ctx context.Context) []Card {
 	fetchers := [](func(context.Context) Card){
 		f.codex, f.opencodeGo, f.antigravity, f.opencodeZen, f.moonshot, f.claude,
+	}
+	if org := envValue("GITHUB_BILLING_ORG"); org != "" {
+		fetchers = append(fetchers, func(ctx context.Context) Card { return f.githubBilling(ctx, org, time.Now()) })
 	}
 	cards := make([]Card, len(fetchers))
 	var wg sync.WaitGroup

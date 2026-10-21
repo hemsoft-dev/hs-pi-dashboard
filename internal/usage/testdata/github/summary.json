@@ -1,0 +1,45 @@
+{
+  "timePeriod": {
+    "year": 2026,
+    "month": 10
+  },
+  "organization": "example-org",
+  "usageItems": [
+    {
+      "product": "Actions",
+      "sku": "actions_linux",
+      "grossQuantity": 100,
+      "discountQuantity": 100,
+      "netQuantity": 0,
+      "grossAmount": 1,
+      "discountAmount": 1,
+      "netAmount": 0,
+      "pricePerUnit": 0.006,
+      "unitType": "minutes"
+    },
+    {
+      "product": "Actions",
+      "sku": "actions_linux_slim",
+      "grossQuantity": 100,
+      "discountQuantity": 100,
+      "netQuantity": 0,
+      "grossAmount": 1,
+      "discountAmount": 1,
+      "netAmount": 0,
+      "pricePerUnit": 0.002,
+      "unitType": "minutes"
+    },
+    {
+      "product": "Copilot",
+      "sku": "copilot_ai_unit",
+      "grossQuantity": 100,
+      "discountQuantity": 100,
+      "netQuantity": 0,
+      "grossAmount": 1,
+      "discountAmount": 1,
+      "netAmount": 0,
+      "pricePerUnit": 0.01,
+      "unitType": "ai-units"
+    }
+  ]
+}
