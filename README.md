@@ -342,7 +342,10 @@ a product stop budget requires attention. Any Copilot net spend requires
 attention, including spend seen only in the AI-credit report. GitHub does not
 expose the Copilot paid-usage policy through these APIs; absence of a Copilot
 budget does not establish whether paid usage is enabled. No policy is inferred
-or changed. API failures show no fabricated zero and retry on the next normal
+or changed. API failures keep the last successful reading from the same UTC billing month
+with its original timestamp and an explicit cached error. They never reuse a
+previous month as the current month, show a fabricated zero, or hide failed
+quota providers in the collapsed summary. Collection retries on the next normal
 usage refresh.
 
 ## Projects

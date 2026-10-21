@@ -179,7 +179,12 @@ func readBudgets(ctx context.Context, run billingRunner, base string) ([]Billing
 			if len(products) == 0 && v.Product != "" {
 				products = []string{v.Product}
 			}
-			if len(products) == 0 || v.Type == "" || v.Scope == "" || v.Amount == nil || !validMoney(*v.Amount) || v.Stop == nil {
+			for _, product := range products {
+				if strings.TrimSpace(product) == "" {
+					return nil, errors.New("invalid GitHub billing budget product")
+				}
+			}
+			if len(products) == 0 || strings.TrimSpace(v.Type) == "" || strings.TrimSpace(v.Scope) == "" || v.Amount == nil || !validMoney(*v.Amount) || v.Stop == nil {
 				return nil, errors.New("invalid GitHub billing budget row")
 			}
 			budgets = append(budgets, BillingBudget{Products: products, Type: v.Type, Scope: v.Scope, Entity: v.Entity, Amount: *v.Amount, StopsUsage: *v.Stop})
@@ -211,7 +216,7 @@ func parseUsageReport(data []byte, org string, now time.Time) ([]billingItem, er
 		return nil, errors.New("invalid GitHub billing usage response or reporting month")
 	}
 	for _, v := range *report.Items {
-		if v.Product == "" || v.GrossAmount == nil || v.NetAmount == nil || !validMoney(*v.GrossAmount) || !validMoney(*v.NetAmount) {
+		if strings.TrimSpace(v.Product) == "" || v.GrossAmount == nil || v.NetAmount == nil || !validMoney(*v.GrossAmount) || !validMoney(*v.NetAmount) {
 			return nil, errors.New("invalid GitHub billing usage row")
 		}
 	}

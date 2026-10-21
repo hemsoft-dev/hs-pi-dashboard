@@ -7,7 +7,9 @@
     const stamp=card.fetchedAt ? new Date(card.fetchedAt).toLocaleString('en-US',{timeZone:'America/New_York'})+' ET' : 'pending';
     if (!b) return `<section class="ubilling"><h3>${esc(card.label)}</h3><p class="ubilling-error">${esc(card.error || 'Billing not reporting')}</p><p class="ubilling-note">Last attempt ${esc(stamp)}</p></section>`;
     const attention=b.attention;
-    return `<section class="ubilling"><h3>${esc(card.label)} <span class="${attention?'ubilling-error':'ubilling-note'}">${attention?'Attention':'No metered spend alert'}</span></h3>
+    const stale=Date.now()-Date.parse(card.fetchedAt || "")>180000;
+    const status=card.error ? "Refresh failed · cached" : attention ? "Attention" : stale ? "Stale reading" : "No metered spend alert";
+    return `<section class="ubilling"><h3>${esc(card.label)} <span class="${attention || card.error?'ubilling-error':'ubilling-note'}">${status}</span></h3>
       <div class="ubilling-lead"><span><b>${quantity(b.credits)}</b> Copilot AI credits used</span><span>${quantity(b.projectedCredits)} projected at month end</span><span><b>${money(b.netUsd)}</b> net this month</span><span>${money(b.projectedNetUsd)} projected net</span></div>
       <p class="ubilling-note">${esc(b.month)} UTC billing period · updated ${esc(stamp)} · projection assumes the month-to-date pace continues</p>
       <p class="ubilling-note">AI credits: ${money(b.creditGrossUsd)} gross · ${money(b.creditNetUsd)} net. Total gross: ${money(b.grossUsd)}. Metered usage only; recurring seat fees are excluded.</p>

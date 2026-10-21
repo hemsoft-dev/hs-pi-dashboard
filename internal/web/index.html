@@ -1054,12 +1054,21 @@ function renderUsage(fleet) {
 
   let verdict = usageVerdict(groups.flatMap((g) => g.windows).sort(compareUrgency));
   const billingAlerts = billingCards.filter((c) => c.error || c.billing?.attention);
+  const quotaUnavailable = cards.filter(c => c.kind === "quota" && !c.gauges?.length);
   if (!groups.length && billingCards.length) {
-    verdict = { text: billingAlerts.length ? billingAlerts.map(c => c.label + (c.error ? " unavailable" : " attention")).join(", ")
-      : BillingDashboard.money(billingCards.reduce((n,c) => n + (c.billing?.netUsd || 0),0)) + " GitHub net this month",
-      status: billingAlerts.length ? "risk" : "ok", source: billingCards.map(c => ({fetchedAt:c.fetchedAt,cardError:c.error,attemptOnly:!c.billing})) };
+    const billingText = billingAlerts.length ? billingAlerts.map(c => c.label + (c.error ? " unavailable" : " attention")).join(", ")
+      : BillingDashboard.money(billingCards.reduce((n,c) => n + (c.billing?.netUsd || 0),0)) + " GitHub net this month";
+    verdict = { text: [quotaUnavailable.length ? "Quota not reporting: " + quotaUnavailable.map(c => c.label).join(", ") : "", billingText].filter(Boolean).join(" · "),
+      status: billingAlerts.length || quotaUnavailable.length ? "risk" : "ok",
+      source: [...billingCards.map(c => ({fetchedAt:c.fetchedAt,cardError:c.error,attemptOnly:!c.billing})),
+        ...quotaUnavailable.map(c => ({fetchedAt:c.fetchedAt,cardError:c.error || "quota not reporting",attemptOnly:true}))] };
   } else if (billingAlerts.length) {
-    verdict.more = [verdict.more, ...billingAlerts.map(c => c.label + (c.error ? " unavailable" : " attention"))].filter(Boolean).join(" · ");
+    const alertText = billingAlerts.map(c => c.label + (c.error ? " unavailable" : " attention")).join(", ");
+    if (["ok", "unknown"].includes(verdict.status)) {
+      verdict.more = [verdict.text, verdict.more].filter(Boolean).join(" · ");
+      verdict.text = alertText;
+    } else verdict.more = [verdict.more, alertText].filter(Boolean).join(" · ");
+    verdict.status = "risk";
   }
   // With no quota windows at all, the verdict is about the quota cards, never a balance's timestamp.
   const quotaAttempts = cards.filter((c) => c.kind === "quota").map((c) => ({ fetchedAt: c.fetchedAt, cardError: c.error, attemptOnly: true }));

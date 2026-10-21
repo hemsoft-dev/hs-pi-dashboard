@@ -147,10 +147,11 @@ func (s *Store) refresh(ctx context.Context) {
 	}
 	for i, card := range snapshot.Cards {
 		old, ok := previous[card.Key]
-		if card.Error != "" && len(card.Gauges) == 0 && card.BalanceUSD == nil && ok && old.Kind == card.Kind && (len(old.Gauges) > 0 || old.BalanceUSD != nil) {
+		sameBillingMonth := old.Billing != nil && old.Billing.Month == card.FetchedAt.UTC().Format("2006-01")
+		if card.Error != "" && len(card.Gauges) == 0 && card.BalanceUSD == nil && card.Billing == nil && ok && old.Kind == card.Kind && (len(old.Gauges) > 0 || old.BalanceUSD != nil || sameBillingMonth) {
 			// Keep the reading's original age, including through repeated failures.
 			// Snapshots handed to callers remain immutable.
-			card.Gauges, card.BalanceUSD, card.FetchedAt = old.Gauges, old.BalanceUSD, old.FetchedAt
+			card.Gauges, card.BalanceUSD, card.Billing, card.FetchedAt = old.Gauges, old.BalanceUSD, old.Billing, old.FetchedAt
 			snapshot.Cards[i] = card
 		}
 	}

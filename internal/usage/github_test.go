@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -134,6 +135,18 @@ func TestGitHubRejectsMalformedAndWrongMonth(t *testing.T) {
 		}
 	}
 }
+func TestGitHubRejectsBlankBudgetProducts(t *testing.T) {
+	for _, products := range []string{`[""]`, `[" "]`, `["actions", "\t"]`} {
+		data := []byte(`{"budgets":[{"budget_product_skus":` + products + `,"budget_type":"ProductPricing","budget_scope":"organization","budget_amount":0,"prevent_further_usage":true}],"has_next_page":false}`)
+		run := func(context.Context, string) (billingResponse, error) {
+			return billingResponse{Status: 200, Data: data}, nil
+		}
+		if _, err := readBudgets(context.Background(), run, "/"); err == nil {
+			t.Fatalf("accepted blank product %s", products)
+		}
+	}
+}
+
 func TestGitHubReportMonthUTC(t *testing.T) {
 	// Eastern is still September; the billing period must already be October UTC.
 	eastern := time.FixedZone("EDT", -4*3600)
@@ -151,5 +164,69 @@ func TestGitHubJSONNeverIncludesCredentials(t *testing.T) {
 	}
 	if strings.Contains(string(b), "token") || strings.Contains(string(b), "Authorization") {
 		t.Fatal(string(b))
+	}
+}
+
+func TestGitHubStoreKeepsSameMonthReadingAndRecovers(t *testing.T) {
+	t.Setenv("GITHUB_BILLING_ORG", "example-org")
+	var failing atomic.Bool
+	fake := billingFake(t)
+	run := func(ctx context.Context, path string) (billingResponse, error) {
+		if failing.Load() {
+			return billingResponse{Status: 503}, errors.New("down")
+		}
+		response, err := fake(ctx, path)
+		if !strings.Contains(path, "budgets") {
+			var wire map[string]any
+			_ = json.Unmarshal(response.Data, &wire)
+			now := time.Now().UTC()
+			wire["timePeriod"] = map[string]int{"year": now.Year(), "month": int(now.Month())}
+			response.Data, _ = json.Marshal(wire)
+		}
+		return response, err
+	}
+	f := &Fetcher{Home: t.TempDir(), githubRun: run, Client: &http.Client{Transport: usageRoundTripper(func(*http.Request) (*http.Response, error) { return nil, errors.New("other provider unavailable") })}}
+	s := NewStore(f, "fixture", time.Minute)
+	find := func() Card {
+		for _, c := range s.Snapshot().Cards {
+			if c.Kind == "billing" {
+				return c
+			}
+		}
+		t.Fatal("billing missing")
+		return Card{}
+	}
+	s.refresh(context.Background())
+	initial := find()
+	if initial.Error != "" || initial.Billing == nil {
+		t.Fatal(initial)
+	}
+	snapshot := s.Snapshot()
+	before, _ := json.Marshal(snapshot)
+	failing.Store(true)
+	for range 2 {
+		s.refresh(context.Background())
+		cached := find()
+		if cached.Error == "" || cached.Billing == nil || cached.Billing.GrossUSD != initial.Billing.GrossUSD || !cached.FetchedAt.Equal(initial.FetchedAt) {
+			t.Fatal("cached values or age lost", cached)
+		}
+	}
+	after, _ := json.Marshal(snapshot)
+	if string(before) != string(after) {
+		t.Fatal("published snapshot changed")
+	}
+	failing.Store(false)
+	s.refresh(context.Background())
+	if recovered := find(); recovered.Error != "" || !recovered.FetchedAt.After(initial.FetchedAt) {
+		t.Fatal("did not recover", recovered)
+	}
+	// A failed new-month read must never be labeled with the previous month's totals.
+	old := initial
+	old.Billing = &Billing{Month: time.Now().UTC().AddDate(0, 0, -40).Format("2006-01"), NetUSD: 99}
+	s.snapshot = Snapshot{Cards: []Card{old}}
+	failing.Store(true)
+	s.refresh(context.Background())
+	if failed := find(); failed.Error == "" || failed.Billing != nil {
+		t.Fatal("previous month retained", failed)
 	}
 }

@@ -349,9 +349,20 @@ test('billing provider selection filters alerts before the shared header and pre
  const billing={key:'github-billing:example-org',label:'GitHub (example-org)',kind:'billing',error:'admin:org required',fetchedAt:new Date().toISOString()};
  const fleet={machines:[{name:'mini',online:true,usage:{cards:[card(),billing]}}]};
  r.lastFleet=fleet;r.renderUsage(fleet);
- assert.match(body.innerHTML,/ubilling/);assert.match(summary.innerHTML,/GitHub.*unavailable/);
+ assert.match(body.innerHTML,/ubilling/);assert.match(summary.innerHTML,/GitHub.*unavailable/);assert.match(summary.innerHTML,/uverdict s-risk/);
  r.setUsageProvider(billing.key,false);
  assert.doesNotMatch(body.innerHTML,/ubilling/);assert.doesNotMatch(summary.innerHTML,/GitHub/);assert.match(body.innerHTML,/Codex/);
  r.setUsageProvider(billing.key,true);
  assert.match(body.innerHTML,/admin:org required/);
+});
+
+
+test('healthy billing cannot hide failed or empty selected quota cards', () => {
+ for (const error of ['quota API unavailable', undefined]) {
+  const {r,summary}=renderer();
+  const quota=card({gauges:[],error});
+  const billing={key:'github-billing:example-org',label:'GitHub',kind:'billing',fetchedAt:new Date().toISOString(),billing:{month:'2026-10',netUsd:0,products:[],budgets:[]}};
+  r.renderUsage({machines:[{usage:{cards:[quota,billing]}}]});
+  assert.match(summary.innerHTML,/uverdict s-risk/);assert.match(summary.innerHTML,/Quota not reporting: Codex/);assert.match(summary.innerHTML,/refresh failed/);
+ }
 });
