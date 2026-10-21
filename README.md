@@ -339,12 +339,23 @@ month-to-date pace. An empty month is zero. Summary totals include every reporte
 subscription SKUs such as `copilot_for_business` when GitHub returns them.
 AI-credit amounts remain a separate report. Projections apply the month-to-date
 pace to all reported summary spend, including subscription charges; they are estimates,
-not invoice amounts or spending caps. Positive reported product spend without
-an applicable product stop budget requires attention. Any Copilot net spend requires
-attention, including spend seen only in the AI-credit report. GitHub does not
-expose the Copilot paid-usage policy through these APIs; absence of a Copilot
-budget does not establish whether paid usage is enabled. No policy is inferred
-or changed. API failures keep the last successful reading from the same UTC billing month
+not invoice amounts or spending caps. The expected `copilot_for_business` seat
+SKU is included in totals and labeled as seats, but does not trigger a usage
+alert merely because it has no stop budget. Other positive product usage without
+an applicable stop budget requires attention. Other Copilot SKUs and AI-credit
+net spend require attention even when a policy or budget should prevent overage;
+unknown SKUs are never treated as seats.
+
+GitHub does not expose the Copilot paid-usage policy through these APIs. Set
+`GITHUB_COPILOT_PAID_USAGE=disabled` on the configured billing agent to record
+the owner-confirmed policy (hemsoft-dev: "AI credit paid usage: Disabled"). The
+card labels it as agent configuration, not API-verified protection, and shows
+"Paid AI usage disabled" for Copilot instead of a missing-budget warning.
+`enabled` is also accepted; leaving it unset keeps the policy unknown. This
+setting documents the policy and never changes it or suppresses actual usage
+charges. Invalid values fail inline. A missing budget alone proves no policy.
+
+API failures keep the last successful reading from the same UTC billing month
 with its original timestamp and an explicit cached error. They never reuse a
 previous month as the current month, show a fabricated zero, or hide failed
 quota providers in the collapsed summary. Collection retries on the next normal

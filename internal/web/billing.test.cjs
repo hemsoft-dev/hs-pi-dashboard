@@ -18,3 +18,12 @@ test('credit report ahead of the summary is shown without rewriting summary mone
  assert.ok(html.includes('AI-credit report is ahead of the usage summary: Copilot $1.00 net / $10.00 gross'));
  assert.ok(html.includes('retain the summary API values'));
 });
+
+test('expected Business seats show configured disabled protection without a false alert',()=>{
+ const b={...billing,credits:0,projectedCredits:0,netUsd:.5,grossUsd:.5,copilotPaidUsage:'disabled',products:[{product:'Copilot',netUsd:.5,grossUsd:.5,seatNetUsd:.5,usageNetUsd:0,hasStopBudget:false,attention:false}]};
+ const html=view.render({...card,billing:b});
+ for(const text of ['No reported spend alert','$0.50 seats','Paid AI usage disabled (configured)','AI credit paid usage: Disabled','not API-verified'])assert.ok(html.includes(text),text);
+ assert.ok(!html.includes('None · attention'));assert.ok(!html.includes('class="ubilling-error"'));
+ const unexpected=view.render({...card,billing:{...b,creditNetUsd:1,attention:true}});
+ assert.ok(unexpected.includes('Attention'));assert.ok(unexpected.includes('unexpected Copilot usage charges'));
+});
