@@ -13,3 +13,13 @@ actual transport schema. Tests also cover the documented plural
 Primary contracts checked 2026-10-21:
 https://docs.github.com/en/rest/billing/usage
 https://docs.github.com/en/rest/billing/budgets
+
+`summary-subscription.json` preserves a `copilot_for_business` row from a
+separate live qualification captured at 05:48 EDT on 2026-10-21,
+after the initial 04:43 EDT capture. Its immutable raw source is retained at
+`/home/franz/artifacts/hs-pi-dashboard/issue-45/repair/summary-subscription-source.json`.
+The org is replaced with `example-org`; gross/net amounts and unit price become
+synthetic $0.50, gross/net quantities become one, and discounts become zero.
+The unit type and SKU retain the producer's values. The earlier claim that
+summary totals excluded subscription SKUs was incorrect; every summary row
+contributes to product totals.

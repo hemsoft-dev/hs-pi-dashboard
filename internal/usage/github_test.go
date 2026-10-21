@@ -303,3 +303,64 @@ func TestGitHubCooldownSuppressesRequestsUntilRetryDeadline(t *testing.T) {
 		t.Fatal("cooldown did not recover", recovered, count.Load())
 	}
 }
+
+func TestGitHubIncludesExpectedSubscriptionWithoutUsageAlert(t *testing.T) {
+	b, err := parseBilling(report("Copilot", 0, 0, 0), billingFixture(t, "summary-subscription"), nil, "example-org", billingNow)
+	if err != nil || b.NetUSD != .5 || b.GrossUSD != .5 || b.CreditNetUSD != 0 || b.CreditGrossUSD != 0 || b.Credits != 0 || b.Attention || len(b.Products) != 1 || b.Products[0].Product != "Copilot" || b.Products[0].NetUSD != .5 || b.Products[0].GrossUSD != .5 || b.Products[0].HasStopBudget || b.Products[0].Attention || b.Products[0].SeatNetUSD != .5 || b.Products[0].UsageNetUSD != 0 || b.Products[0].UsageGrossUSD != 0 {
+		t.Fatal("subscription summary row lost or conflated with AI credits", b, err)
+	}
+}
+
+func TestGitHubSeatExceptionDoesNotHideUsage(t *testing.T) {
+	seat := billingFixture(t, "summary-subscription")
+	for _, sku := range []string{"copilot_premium_requests", "", "new_unknown_sku"} {
+		data := []byte(strings.Replace(string(seat), "copilot_for_business", sku, 1))
+		b, err := parseBilling(report("Copilot", 0, 0, 0), data, nil, "example-org", billingNow)
+		if err != nil || !b.Attention || !b.Products[0].Attention || b.Products[0].SeatNetUSD != 0 || b.Products[0].UsageNetUSD != .5 || b.Products[0].UsageGrossUSD != .5 {
+			t.Fatal("non-seat SKU did not alert", sku, b, err)
+		}
+	}
+	b, err := parseBilling(report("Copilot", 1, 1, 100), seat, nil, "example-org", billingNow)
+	if err != nil || !b.Attention || b.NetUSD != .5 || b.CreditNetUSD != 1 {
+		t.Fatal("expected seat hid credit-report spend or changed API totals", b, err)
+	}
+	var mixed map[string]any
+	if err := json.Unmarshal(seat, &mixed); err != nil {
+		t.Fatal(err)
+	}
+	rows := mixed["usageItems"].([]any)
+	mixed["usageItems"] = append(rows, map[string]any{"product": "Copilot", "sku": "copilot_premium_requests", "grossAmount": .25, "netAmount": .25})
+	data, err := json.Marshal(mixed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err = parseBilling(report("Copilot", 0, 0, 0), data, nil, "example-org", billingNow)
+	if err != nil || !b.Attention || b.NetUSD != .75 || b.Products[0].SeatNetUSD != .5 || b.Products[0].UsageNetUSD != .25 || b.Products[0].UsageGrossUSD != .25 {
+		t.Fatal("mixed seats and usage lost classification", b, err)
+	}
+}
+
+func TestGitHubConfiguredPolicyIsExplicitAndCannotSuppressCharges(t *testing.T) {
+	for _, policy := range []string{"", "disabled", "enabled", "typo"} {
+		t.Run(policy, func(t *testing.T) {
+			t.Setenv("GITHUB_COPILOT_PAID_USAGE", policy)
+			run := billingFake(t)
+			f := &Fetcher{githubRun: func(ctx context.Context, path string) (billingResponse, error) {
+				if strings.Contains(path, "ai_credit") {
+					return billingResponse{Status: 200, Data: report("Copilot", 1, 1, 100)}, nil
+				}
+				return run(ctx, path)
+			}}
+			c := f.githubBilling(context.Background(), "example-org", billingNow)
+			if policy == "typo" {
+				if c.Error == "" || c.Billing != nil {
+					t.Fatal("invalid policy accepted", c)
+				}
+				return
+			}
+			if c.Error != "" || c.Billing.CopilotPaidUsage != policy || !c.Billing.Attention {
+				t.Fatal("configured policy hid actual usage or lost provenance", c)
+			}
+		})
+	}
+}

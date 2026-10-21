@@ -408,5 +408,7 @@ gold figures, muted timestamps, tabular monospace values and hairline tables.
 The lead row pairs measured credits and net dollars with their month-end
 projections. Product spend and budget tables retain scope and stop-state words.
 Ember identifies billing attention or collection errors. The paid-usage policy
-limitation stays visible. Tables scroll within labeled keyboard-focusable regions
+limitation stays visible; an owner-confirmed disabled policy is explicitly labeled
+as agent configuration. Expected Business seats stay in net totals without a
+usage alert, while unknown Copilot SKUs and actual AI-credit charges remain alerts. Tables scroll within labeled keyboard-focusable regions
 on phones; provider selection removes the card and its alerts together.

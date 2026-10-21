@@ -19,7 +19,7 @@ import (
 	"time"
 )
 
-// Billing is metered organization usage, not the recurring subscription invoice.
+// Billing preserves organization usage-summary and AI-credit reports separately.
 type Billing struct {
 	Organization     string           `json:"organization"`
 	Month            string           `json:"month"`
@@ -33,6 +33,7 @@ type Billing struct {
 	Products         []BillingProduct `json:"products"`
 	Budgets          []BillingBudget  `json:"budgets"`
 	Attention        bool             `json:"attention"`
+	CopilotPaidUsage string           `json:"copilotPaidUsage,omitempty"`
 }
 type BillingProduct struct {
 	Product       string  `json:"product"`
@@ -40,6 +41,9 @@ type BillingProduct struct {
 	GrossUSD      float64 `json:"grossUsd"`
 	HasStopBudget bool    `json:"hasStopBudget"`
 	Attention     bool    `json:"attention"`
+	SeatNetUSD    float64 `json:"seatNetUsd"`
+	UsageNetUSD   float64 `json:"usageNetUsd"`
+	UsageGrossUSD float64 `json:"usageGrossUsd"`
 }
 type BillingBudget struct {
 	Products   []string `json:"products"`
@@ -65,6 +69,11 @@ func (f *Fetcher) githubBilling(ctx context.Context, org string, now time.Time) 
 	card := Card{Key: "github-billing:" + strings.ToLower(org), Label: "GitHub (" + org + ")", Kind: "billing", FetchedAt: now}
 	if !orgPattern.MatchString(org) {
 		card.Error = "invalid GitHub billing organization"
+		return card
+	}
+	policy := envValue("GITHUB_COPILOT_PAID_USAGE")
+	if policy != "" && policy != "disabled" && policy != "enabled" {
+		card.Error = "invalid GITHUB_COPILOT_PAID_USAGE; use disabled or enabled, or leave unset"
 		return card
 	}
 	c, cancel := context.WithTimeout(ctx, 20*time.Second)
@@ -138,6 +147,7 @@ func (f *Fetcher) githubBilling(ctx context.Context, org string, now time.Time) 
 		return card
 	}
 	card.Billing = b
+	b.CopilotPaidUsage = policy
 	return card
 }
 func billingError(resp billingResponse, err error) error {
@@ -256,6 +266,7 @@ func readBudgets(ctx context.Context, run billingRunner, base string) ([]Billing
 
 type billingItem struct {
 	Product       string   `json:"product"`
+	SKU           string   `json:"sku"`
 	GrossQuantity *float64 `json:"grossQuantity"`
 	GrossAmount   *float64 `json:"grossAmount"`
 	NetAmount     *float64 `json:"netAmount"`
@@ -321,6 +332,14 @@ func parseBilling(creditData, summaryData []byte, budgets []BillingBudget, org s
 		}
 		p.NetUSD += *v.NetAmount
 		p.GrossUSD += *v.GrossAmount
+		// The Business seat is an expected subscription charge, not AI-credit
+		// overage. Unknown SKUs remain usage so a new charge cannot hide here.
+		if strings.EqualFold(v.Product, "Copilot") && strings.EqualFold(v.SKU, "copilot_for_business") {
+			p.SeatNetUSD += *v.NetAmount
+		} else {
+			p.UsageNetUSD += *v.NetAmount
+			p.UsageGrossUSD += *v.GrossAmount
+		}
 		b.NetUSD += *v.NetAmount
 		b.GrossUSD += *v.GrossAmount
 	}
@@ -335,7 +354,7 @@ func parseBilling(creditData, summaryData []byte, budgets []BillingBudget, org s
 				}
 			}
 		}
-		p.Attention = p.NetUSD > 0 && (!p.HasStopBudget || strings.EqualFold(p.Product, "Copilot"))
+		p.Attention = p.UsageNetUSD > 0 && (!p.HasStopBudget || strings.EqualFold(p.Product, "Copilot"))
 		b.Attention = b.Attention || p.Attention
 		b.Products = append(b.Products, *p)
 	}
