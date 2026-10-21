@@ -1,0 +1,14 @@
+.ubilling { padding:14px; border-top:1px solid var(--card-border); font-size:12px; line-height:1.6; }
+.ubilling h3 { display:flex; flex-wrap:wrap; justify-content:space-between; gap:8px; color:var(--gold); font-size:12px; margin-bottom:10px; }
+.ubilling h4 { color:var(--gold); font-size:11px; text-transform:uppercase; letter-spacing:.05em; margin:16px 0 6px; }
+.ubilling-lead { display:flex; flex-wrap:wrap; gap:8px 24px; margin-bottom:8px; }
+.ubilling-lead b { font-size:14px; color:var(--gold); font-weight:600; }
+.ubilling-note { color:var(--muted); font-size:11px; margin:6px 0; overflow-wrap:anywhere; }
+.ubilling-error { color:var(--ember); margin:8px 0; overflow-wrap:anywhere; }
+.ubilling-scroll { max-width:100%; overflow-x:auto; margin-top:12px; border:1px solid var(--card-border); }
+.ubilling table { border-collapse:collapse; width:100%; font-size:11px; }
+.ubilling td,.ubilling th { padding:8px 10px; text-align:left; border-bottom:1px solid var(--card-border); }
+.ubilling th { font-weight:400; }
+.ubilling thead th { color:var(--muted); font-size:10px; text-transform:uppercase; white-space:nowrap; }
+.ubilling .ubilling-scroll:focus-visible { outline:2px solid var(--gold); outline-offset:2px; }
+@media(max-width:640px) { .ubilling { padding:12px 10px; } .ubilling-lead { display:grid; grid-template-columns:minmax(0,1fr); gap:4px; } .ubilling-scroll table { min-width:440px; } }

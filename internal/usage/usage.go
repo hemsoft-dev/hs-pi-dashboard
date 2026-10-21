@@ -49,6 +49,7 @@ type Gauge struct {
 
 // Card is one provider's dashboard card.
 type Card struct {
+	Billing    *Billing  `json:"billing,omitempty"`
 	Key        string    `json:"key"`
 	Label      string    `json:"label"`
 	Kind       string    `json:"kind"`
@@ -80,7 +81,10 @@ type Fetcher struct {
 	Client *http.Client
 	Home   string // defaults to the current user's home
 
-	claudeGate claudeRateGate
+	githubRun       billingRunner
+	githubRateMu    sync.Mutex
+	githubRateUntil map[string]time.Time
+	claudeGate      claudeRateGate
 }
 
 // New returns a fetcher with defaults.
@@ -145,10 +149,11 @@ func (s *Store) refresh(ctx context.Context) {
 	}
 	for i, card := range snapshot.Cards {
 		old, ok := previous[card.Key]
-		if card.Error != "" && len(card.Gauges) == 0 && card.BalanceUSD == nil && ok && old.Kind == card.Kind && (len(old.Gauges) > 0 || old.BalanceUSD != nil) {
+		sameBillingMonth := old.Billing != nil && old.Billing.Month == card.FetchedAt.UTC().Format("2006-01")
+		if card.Error != "" && len(card.Gauges) == 0 && card.BalanceUSD == nil && card.Billing == nil && ok && old.Kind == card.Kind && (len(old.Gauges) > 0 || old.BalanceUSD != nil || sameBillingMonth) {
 			// Keep the reading's original age, including through repeated failures.
 			// Snapshots handed to callers remain immutable.
-			card.Gauges, card.BalanceUSD, card.FetchedAt = old.Gauges, old.BalanceUSD, old.FetchedAt
+			card.Gauges, card.BalanceUSD, card.Billing, card.FetchedAt = old.Gauges, old.BalanceUSD, old.Billing, old.FetchedAt
 			snapshot.Cards[i] = card
 		}
 	}
@@ -176,6 +181,9 @@ func (s *Store) Snapshot() Snapshot {
 func (f *Fetcher) FetchAll(ctx context.Context) []Card {
 	fetchers := [](func(context.Context) Card){
 		f.codex, f.opencodeGo, f.antigravity, f.opencodeZen, f.moonshot, f.claude,
+	}
+	if org := envValue("GITHUB_BILLING_ORG"); org != "" {
+		fetchers = append(fetchers, func(ctx context.Context) Card { return f.githubBilling(ctx, org, time.Now()) })
 	}
 	cards := make([]Card, len(fetchers))
 	var wg sync.WaitGroup

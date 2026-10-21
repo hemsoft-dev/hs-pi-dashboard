@@ -1,0 +1,22 @@
+{
+  "timePeriod": {
+    "year": 2026,
+    "month": 10
+  },
+  "organization": "example-org",
+  "usageItems": [
+    {
+      "product": "Copilot",
+      "sku": "Copilot AI Credits",
+      "model": "Code Review model",
+      "unitType": "ai-credits",
+      "pricePerUnit": 0.01,
+      "grossQuantity": 0.0,
+      "grossAmount": 0.0,
+      "discountQuantity": 0.0,
+      "discountAmount": 0.0,
+      "netQuantity": 0.0,
+      "netAmount": 0.0
+    }
+  ]
+}
