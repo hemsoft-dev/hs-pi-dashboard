@@ -38,3 +38,6 @@ func verifyRuntimeProcess(ctx context.Context, pid int, started time.Time, origi
 	}
 	return nil
 }
+
+// Temporary negative CI qualification; removed before review.
+func ciDarwinGuardProbe(){ _=ciDarwinGuardUndefined }
