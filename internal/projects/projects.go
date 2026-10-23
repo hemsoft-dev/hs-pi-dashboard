@@ -8,10 +8,11 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/HemSoft/hs-pi-dashboard/internal/githubcli"
-	"io"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -93,6 +94,8 @@ type Store struct {
 	every    time.Duration
 	mu       sync.RWMutex
 	snapshot Snapshot
+	retryAt  time.Time
+	now      func() time.Time
 }
 
 func New(paths []string, every time.Duration) *Store {
@@ -121,7 +124,7 @@ func New(paths []string, every time.Duration) *Store {
 			seen[p] = true
 		}
 	}
-	s := &Store{paths: unique, run: runStatus, every: every}
+	s := &Store{paths: unique, run: runStatus, every: every, now: time.Now}
 	s.snapshot = Snapshot{Results: []Result{}}
 	for _, p := range unique {
 		s.snapshot.Results = append(s.snapshot.Results, Result{Path: p, Error: "initial collection pending"})
@@ -132,7 +135,7 @@ func (s *Store) Start(ctx context.Context) {
 	s.refresh(ctx)
 	// Wait a full interval after collection finishes. A slow sweep must not
 	// queue another immediate sweep as a ticker would.
-	timer := time.NewTimer(s.every)
+	timer := time.NewTimer(s.nextDelay())
 	defer timer.Stop()
 	for {
 		select {
@@ -140,25 +143,47 @@ func (s *Store) Start(ctx context.Context) {
 			return
 		case <-timer.C:
 			s.refresh(ctx)
-			timer.Reset(s.every)
+			timer.Reset(s.nextDelay())
 		}
 	}
 }
 func (s *Store) Snapshot() Snapshot { s.mu.RLock(); defer s.mu.RUnlock(); return s.snapshot }
+func (s *Store) nextDelay() time.Duration {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return max(s.every, s.retryAt.Sub(s.now()))
+}
+
 func (s *Store) refresh(ctx context.Context) {
+	s.mu.RLock()
+	blocked := s.now().Before(s.retryAt)
+	s.mu.RUnlock()
+	if blocked {
+		return
+	}
 	old := s.Snapshot()
-	previous := map[string]*Document{}
+	previous := map[string]Result{}
 	for _, r := range old.Results {
-		previous[r.Path] = r.Document
+		previous[r.Path] = r
 	}
 	results := make([]Result, len(s.paths))
+	var limited *rateLimitError
+	var retryAt time.Time
 	// Keep at most one gh-x process running on this agent. Each process can
 	// make several GitHub requests; a worker pool multiplies that burst.
 	for i, p := range s.paths {
 		if ctx.Err() != nil {
 			return
 		}
-		r := Result{Path: p, AttemptedAt: time.Now()}
+		r := Result{Path: p}
+		if limited != nil {
+			r.Error = "skipped: GitHub rate limited"
+			r.AttemptedAt = previous[p].AttemptedAt
+			r.Document = previous[p].Document
+			results[i] = r
+			continue
+		}
+		r.AttemptedAt = s.now()
 		c, cancel := context.WithTimeout(ctx, 45*time.Second)
 		data, err := s.run(c, p)
 		cancel()
@@ -166,15 +191,23 @@ func (s *Store) refresh(ctx context.Context) {
 			return
 		}
 		if err != nil {
-			r.Error = "gh x status --json failed; check gh-x installation, checkout and host authentication"
+			if errors.As(err, &limited) {
+				r.Error = limited.Error()
+				retryAt = maxTime(s.now().Add(s.every), limited.until)
+			} else {
+				r.Error = "gh x status --json failed; check gh-x installation, checkout and host authentication"
+			}
 		} else {
 			r.Document, err = Parse(data)
 			if err != nil {
 				r.Error = err.Error()
+			} else if limited = documentRateLimit(r.Document, s.now()); limited != nil {
+				r.Error = limited.Error()
+				retryAt = maxTime(s.now().Add(s.every), limited.until)
 			}
 		}
 		if r.Error != "" {
-			r.Document = previous[p]
+			r.Document = previous[p].Document
 		}
 		results[i] = r
 	}
@@ -182,19 +215,23 @@ func (s *Store) refresh(ctx context.Context) {
 	// Cancellation can also happen with no configured paths or while waiting
 	// to publish the completed sweep. Keep the prior snapshot in that case.
 	if ctx.Err() == nil {
-		s.snapshot = Snapshot{GeneratedAt: time.Now(), Results: results}
+		s.snapshot = Snapshot{GeneratedAt: s.now(), Results: results}
+		s.retryAt = retryAt
 	}
 	s.mu.Unlock()
 }
 
 // A bounded writer prevents runaway subprocess output from exhausting the agent.
-type limitedBuffer struct{ bytes.Buffer }
+type limitedBuffer struct{ buffer bytes.Buffer }
+
+func (b *limitedBuffer) Len() int      { return b.buffer.Len() }
+func (b *limitedBuffer) Bytes() []byte { return b.buffer.Bytes() }
 
 func (b *limitedBuffer) Write(p []byte) (int, error) {
 	if b.Len()+len(p) > 8<<20 {
 		return 0, errors.New("status output too large")
 	}
-	return b.Buffer.Write(p)
+	return b.buffer.Write(p)
 }
 func runStatus(ctx context.Context, path string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, githubcli.Binary(), "x", "status", "--json")
@@ -202,9 +239,137 @@ func runStatus(ctx context.Context, path string) ([]byte, error) {
 	cmd.WaitDelay = time.Second
 	var out limitedBuffer
 	cmd.Stdout = &out
-	cmd.Stderr = io.Discard
+	stderr := stderrBuffer{now: time.Now}
+	cmd.Stderr = &stderr
 	err := cmd.Run()
-	return out.Bytes(), err
+	if err != nil {
+		return out.Bytes(), stderr.failure(err)
+	}
+	return out.Bytes(), nil
+}
+
+// Retain only a bounded diagnostic prefix, but drain all stderr so a verbose
+// child cannot block. Raw output never enters dashboard errors.
+type stderrBuffer struct {
+	buffer  bytes.Buffer
+	tail    []byte
+	now     func() time.Time
+	limited bool
+	until   time.Time
+}
+
+func (b *stderrBuffer) Len() int      { return b.buffer.Len() }
+func (b *stderrBuffer) Bytes() []byte { return b.buffer.Bytes() }
+
+func (b *stderrBuffer) Write(p []byte) (int, error) {
+	n := len(p)
+	if left := (32 << 10) - b.Len(); left > 0 {
+		_, _ = b.buffer.Write(p[:min(left, len(p))])
+	}
+	// Scan the complete stream in fixed-size pieces. The overlap recognizes
+	// diagnostics/headers split across writes without retaining verbose logs.
+	if b.now == nil {
+		b.now = time.Now
+	}
+	for len(p) > 0 {
+		size := min(len(p), 4096)
+		window := append(append([]byte(nil), b.tail...), p[:size]...)
+		b.observe(window, false)
+		b.tail = append(b.tail[:0], window[max(0, len(window)-256):]...)
+		p = p[size:]
+	}
+	return n, nil
+}
+
+func (b *stderrBuffer) observe(data []byte, final bool) {
+	for _, match := range rateLimitDiagnostic.FindAllIndex(data, -1) {
+		end := match[1]
+		last := data[end-1]
+		// A phrase at the current chunk edge needs its following delimiter
+		// before we know it is not part of a longer path or identifier.
+		if final || end < len(data) || strings.ContainsRune(" \t\r\n:;,.)\"'", rune(last)) {
+			b.limited = true
+		}
+	}
+	b.until = maxTime(b.until, rateDeadline(data, b.now(), final))
+}
+
+func (b *stderrBuffer) failure(original error) error {
+	b.observe(b.tail, true)
+	if b.limited {
+		return &rateLimitError{until: b.until}
+	}
+	return original
+}
+
+type rateLimitError struct{ until time.Time }
+
+func (e *rateLimitError) Error() string {
+	if !e.until.IsZero() {
+		return "GitHub rate limited; retry after " + e.until.UTC().Format(time.RFC3339)
+	}
+	return "GitHub rate limited; retry on the next collection interval"
+}
+
+var resetHeader = regexp.MustCompile(`(?im)x-ratelimit-reset\s*[:=]\s*(\d+)`)
+var rateLimitDiagnostic = regexp.MustCompile(`(?i)(?:^|[\s:("'\[])(?:api rate limit(?: already)? exceeded|secondary rate limit|github rate limit|rate limit exceeded|rate_limit exceeded|rate_limit_exceeded|abuse detection(?: mechanism)?|http 429)(?:$|[\s:;,.)"'])`)
+var retryHeader = regexp.MustCompile(`(?im)retry-after\s*[:=]\s*(\d+)`)
+
+func maxTime(a, b time.Time) time.Time {
+	if b.After(a) {
+		return b
+	}
+	return a
+}
+func classifyStatusFailure(stderr []byte, original error, now time.Time) error {
+	if !rateLimitDiagnostic.Match(stderr) {
+		return original
+	}
+	return &rateLimitError{until: rateDeadline(stderr, now, true)}
+}
+
+func rateDeadline(data []byte, now time.Time, final bool) time.Time {
+	var until time.Time
+	for _, match := range resetHeader.FindAllSubmatchIndex(data, -1) {
+		if !final && match[3] == len(data) {
+			continue
+		}
+		if seconds, err := strconv.ParseInt(string(data[match[2]:match[3]]), 10, 64); err == nil {
+			until = maxTime(until, time.Unix(seconds, 0))
+		}
+	}
+	for _, match := range retryHeader.FindAllSubmatchIndex(data, -1) {
+		if !final && match[3] == len(data) {
+			continue
+		}
+		if seconds, err := strconv.ParseInt(string(data[match[2]:match[3]]), 10, 64); err == nil && seconds > 0 && seconds <= int64((time.Duration(1<<63-1))/time.Second) {
+			until = maxTime(until, now.Add(time.Duration(seconds)*time.Second))
+		}
+	}
+	if !until.After(now) {
+		return time.Time{}
+	}
+	return until
+}
+
+// gh-x preserves GitHub fetch failures in section metadata and can exit zero.
+// Classify only unavailable section reasons; all verdict policy stays in gh-x.
+func documentRateLimit(d *Document, now time.Time) *rateLimitError {
+	var result *rateLimitError
+	for _, section := range d.Sections {
+		if section.Status != "unavailable" {
+			continue
+		}
+		var limited *rateLimitError
+		if errors.As(classifyStatusFailure([]byte(section.Reason), errors.New("section unavailable"), now), &limited) {
+			if result == nil {
+				result = limited
+			} else {
+				result.until = maxTime(result.until, limited.until)
+			}
+		}
+	}
+	return result
 }
 
 type Local struct {
