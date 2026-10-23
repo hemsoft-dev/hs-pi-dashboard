@@ -145,6 +145,7 @@
   .ugroup-sum.s-out b, .ugroup-sum.s-risk .uphrase, .ugroup-sum.s-out .uphrase { color: var(--ember); }
   .unote { margin-left: auto; color: var(--muted); font-size: 11px; white-space: nowrap; }
   .unote.cached { color: var(--ember); }
+  .unote.warning { flex: 1 1 100%; white-space: normal; overflow-wrap: anywhere; font-weight: 400; }
   .urows { padding: 4px 0; }
   .urow { min-height: 32px; font-size: 12px; }
   .uwin { color: var(--text); overflow-wrap: anywhere; }
@@ -586,7 +587,7 @@ function cardNote(card) {
 }
 function noteHtml(card) {
   const note = cardNote(card);
-  return (card.warning ? `<span class="unote">${esc(card.warning)}</span>` : "")
+  return (card.warning ? `<span class="unote warning">${esc(card.warning)}</span>` : "")
     + (note ? `<span class="unote${note.cls ? " " + note.cls : ""}">${esc(note.text)}</span>` : "");
 }
 // Clauses wrap as whole units; each separator trails its clause so a wrapped
