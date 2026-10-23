@@ -557,7 +557,8 @@ function quotaGroup(card, windows, lead = false) {
 // The header's freshness describes the reading behind the verdict, not the
 // newest card, so a stale or cached verdict never reads as freshly updated.
 function headerStamp(source, cards) {
-  const readings = source?.length ? source : cards;
+  const readings = source?.length ? source : cards.reduce((latest, card) =>
+    !latest.length || (Date.parse(card.fetchedAt) || 0) > (Date.parse(latest[0].fetchedAt) || 0) ? [card] : latest, []);
   const times = readings.map((r) => Date.parse(r.fetchedAt || "")).filter(Number.isFinite);
   if (!times.length) return '<span class="ufresh">update time unavailable</span>';
   const oldest = new Date(source?.length ? Math.min(...times) : Math.max(...times)).toISOString();
@@ -570,7 +571,7 @@ function headerStamp(source, cards) {
     const cached = failed.some((r) => !r.attemptOnly);
     return `<span class="ufresh cached">refresh failed${age ? " ·" : ""}${cached ? " cached" : ""}${age}</span>`;
   }
-  if (Date.now() - Date.parse(oldest) > USAGE_STALE_MS) return `<span class="ufresh stale">stale · ${rel(oldest)}</span>`;
+  if (readings.some(r => Date.now() - Date.parse(r.fetchedAt || "") > Math.max(USAGE_STALE_MS, Number(r.freshForSeconds || 0)*1000))) return `<span class="ufresh stale">stale · ${rel(oldest)}</span>`;
   return `<span class="ufresh">updated ${rel(oldest)}</span>`;
 }
 function failureText(card) {
@@ -1026,8 +1027,14 @@ function renderUsage(fleet) {
   // card for each.
   const byKey = new Map();
   for (const m of machines) {
-    for (const c of m.usage.cards) {
-      if (!usageProviderEnabled(c.key)) continue;
+    for (const reported of m.usage.cards) {
+      if (!usageProviderEnabled(reported.key)) continue;
+      // Offline agents can retain old snapshots. Never let an error-free
+      // previous-month report beat a current-month collection failure.
+      const c = reported.kind === "billing" && reported.billing
+        && reported.billing.month !== new Date().toISOString().slice(0, 7)
+        ? {...reported, billing: undefined, error: "GitHub billing awaiting current UTC month collection"}
+        : reported;
       const prev = byKey.get(c.key);
       const better = !prev
         || (prev.error && !c.error)
@@ -1067,7 +1074,7 @@ function renderUsage(fleet) {
       : BillingDashboard.money(billingCards.reduce((n,c) => n + (c.billing?.netUsd || 0),0)) + " GitHub net in usage summary";
     verdict = { text: [quotaUnavailable.length ? "Quota not reporting: " + quotaUnavailable.map(c => c.label).join(", ") : "", billingText].filter(Boolean).join(" · "),
       status: billingAlerts.length || quotaUnavailable.length ? "risk" : "ok",
-      source: [...billingCards.map(c => ({fetchedAt:c.fetchedAt,cardError:c.error,attemptOnly:!c.billing})),
+      source: [...billingCards.map(c => ({fetchedAt:c.fetchedAt,freshForSeconds:c.freshForSeconds,cardError:c.error,attemptOnly:!c.billing})),
         ...quotaUnavailable.map(c => ({fetchedAt:c.fetchedAt,cardError:c.error || "quota not reporting",attemptOnly:true}))] };
   } else if (billingAlerts.length) {
     const alertText = billingAlerts.map(c => c.label + (c.error ? " unavailable" : " attention")).join(", ");
@@ -1076,6 +1083,9 @@ function renderUsage(fleet) {
       verdict.text = alertText;
     } else verdict.more = [verdict.more, alertText].filter(Boolean).join(" · ");
     verdict.status = "risk";
+    verdict.source = [...(verdict.source || []), ...billingAlerts.map(c => ({
+      fetchedAt:c.fetchedAt, freshForSeconds:c.freshForSeconds, cardError:c.error, attemptOnly:!c.billing
+    }))];
   }
   // With no quota windows at all, the verdict is about the quota cards, never a balance's timestamp.
   const quotaAttempts = cards.filter((c) => c.kind === "quota").map((c) => ({ fetchedAt: c.fetchedAt, cardError: c.error, attemptOnly: true }));

@@ -49,14 +49,15 @@ type Gauge struct {
 
 // Card is one provider's dashboard card.
 type Card struct {
-	Billing    *Billing  `json:"billing,omitempty"`
-	Key        string    `json:"key"`
-	Label      string    `json:"label"`
-	Kind       string    `json:"kind"`
-	BalanceUSD *float64  `json:"balanceUsd,omitempty"`
-	Gauges     []Gauge   `json:"gauges,omitempty"`
-	Error      string    `json:"error,omitempty"`
-	FetchedAt  time.Time `json:"fetchedAt"`
+	FreshForSeconds float64   `json:"freshForSeconds,omitempty"`
+	Billing         *Billing  `json:"billing,omitempty"`
+	Key             string    `json:"key"`
+	Label           string    `json:"label"`
+	Kind            string    `json:"kind"`
+	BalanceUSD      *float64  `json:"balanceUsd,omitempty"`
+	Gauges          []Gauge   `json:"gauges,omitempty"`
+	Error           string    `json:"error,omitempty"`
+	FetchedAt       time.Time `json:"fetchedAt"`
 }
 
 // Snapshot is what the agent /usage endpoint returns.
@@ -81,6 +82,8 @@ type Fetcher struct {
 	Client *http.Client
 	Home   string // defaults to the current user's home
 
+	githubCacheMu   sync.Mutex
+	githubCache     map[string]billingCacheEntry
 	githubRun       billingRunner
 	githubRateMu    sync.Mutex
 	githubRateUntil map[string]time.Time
@@ -183,7 +186,7 @@ func (f *Fetcher) FetchAll(ctx context.Context) []Card {
 		f.codex, f.opencodeGo, f.antigravity, f.opencodeZen, f.moonshot, f.claude,
 	}
 	if org := envValue("GITHUB_BILLING_ORG"); org != "" {
-		fetchers = append(fetchers, func(ctx context.Context) Card { return f.githubBilling(ctx, org, time.Now()) })
+		fetchers = append(fetchers, func(ctx context.Context) Card { return f.cachedGitHubBilling(ctx, org, time.Now()) })
 	}
 	cards := make([]Card, len(fetchers))
 	var wg sync.WaitGroup

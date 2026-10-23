@@ -358,9 +358,13 @@ charges. Invalid values fail inline. A missing budget alone proves no policy.
 API failures keep the last successful reading from the same UTC billing month
 with its original timestamp and an explicit cached error. They never reuse a
 previous month as the current month, show a fabricated zero, or hide failed
-quota providers in the collapsed summary. Collection retries on the next normal
-usage refresh. Rate-limit responses honor Retry-After and primary reset times,
-with a minimum one-minute cooldown; secondary 403 responses are distinct from
+quota providers in the collapsed summary. Billing defaults to a separate 15-minute cadence. Set
+`GITHUB_BILLING_INTERVAL` to a Go duration such as `30m`; values below
+15 minutes are clamped, and invalid values use the default. Between collections,
+cards retain their original timestamp. Access errors also wait this interval.
+Each configured org makes 12 requests/hour with one budgets page at the default
+interval, or at most 48 with ten pages. Other providers keep their cadence. Rate-limit responses honor Retry-After and primary reset times,
+with a cooldown of at least the billing interval; secondary 403 responses are distinct from
 missing scope. Net/gross product totals and net projections preserve the usage
 summary exactly. If the AI-credit report is ahead, the card highlights its
 separate Copilot dollar amounts without adding overlapping reports together.

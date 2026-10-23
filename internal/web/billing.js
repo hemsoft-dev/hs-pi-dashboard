@@ -11,7 +11,7 @@
     const copilotUsageNet=copilot.reduce((n,p)=>n+(p.usageNetUsd??p.netUsd),0);
     const copilotUsageGross=copilot.reduce((n,p)=>n+(p.usageGrossUsd??p.grossUsd),0);
     const creditAhead=b.creditNetUsd>copilotUsageNet || b.creditGrossUsd>copilotUsageGross;
-    const stale=Date.now()-Date.parse(card.fetchedAt || "")>180000;
+    const stale=Date.now()-Date.parse(card.fetchedAt || "")>Math.max(180000, Number(card.freshForSeconds || 0)*1000);
     const status=card.error ? "Refresh failed · cached" : attention ? "Attention" : stale ? "Stale reading" : "No reported spend alert";
     return `<section class="ubilling" data-billing-key="${esc(card.key)}"><h3>${esc(card.label)} <span class="${attention || card.error?'ubilling-error':'ubilling-note'}">${status}</span></h3>
       <div class="ubilling-lead"><span><b>${quantity(b.credits)}</b> Copilot AI credits used</span><span>${quantity(b.projectedCredits)} projected at month end</span><span><b>${money(b.netUsd)}</b> net in usage summary</span><span>${money(b.projectedNetUsd)} projected summary net</span></div>
