@@ -239,7 +239,7 @@ func runStatus(ctx context.Context, path string) ([]byte, error) {
 	cmd.WaitDelay = time.Second
 	var out limitedBuffer
 	cmd.Stdout = &out
-	stderr := stderrBuffer{now: time.Now()}
+	stderr := stderrBuffer{now: time.Now}
 	cmd.Stderr = &stderr
 	err := cmd.Run()
 	if err != nil {
@@ -253,7 +253,7 @@ func runStatus(ctx context.Context, path string) ([]byte, error) {
 type stderrBuffer struct {
 	buffer  bytes.Buffer
 	tail    []byte
-	now     time.Time
+	now     func() time.Time
 	limited bool
 	until   time.Time
 }
@@ -268,8 +268,8 @@ func (b *stderrBuffer) Write(p []byte) (int, error) {
 	}
 	// Scan the complete stream in fixed-size pieces. The overlap recognizes
 	// diagnostics/headers split across writes without retaining verbose logs.
-	if b.now.IsZero() {
-		b.now = time.Now()
+	if b.now == nil {
+		b.now = time.Now
 	}
 	for len(p) > 0 {
 		size := min(len(p), 4096)
@@ -291,7 +291,7 @@ func (b *stderrBuffer) observe(data []byte, final bool) {
 			b.limited = true
 		}
 	}
-	b.until = maxTime(b.until, rateDeadline(data, b.now, final))
+	b.until = maxTime(b.until, rateDeadline(data, b.now(), final))
 }
 
 func (b *stderrBuffer) failure(original error) error {

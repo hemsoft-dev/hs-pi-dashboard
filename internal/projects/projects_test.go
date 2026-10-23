@@ -481,7 +481,7 @@ func TestRateDiagnosticsBeyondStderrPrefixAndAcrossWrites(t *testing.T) {
 	now := time.Date(2026, 10, 23, 4, 0, 0, 0, time.UTC)
 	message := "GitHub rate limit; X-RateLimit-Reset: 1792735200; Retry-After: 3600"
 	for split := 0; split <= len(message); split++ {
-		b := stderrBuffer{now: now}
+		b := stderrBuffer{now: func() time.Time { return now }}
 		_, _ = io.Copy(&b, struct{ io.Reader }{strings.NewReader(strings.Repeat("debug ", 10000))})
 		_, _ = b.Write([]byte(message[:split]))
 		_, _ = b.Write([]byte(message[split:]))
@@ -496,7 +496,7 @@ func TestRateDiagnosticsBeyondStderrPrefixAndAcrossWrites(t *testing.T) {
 
 func TestStderrFinalDiagnosticAndHeaderNeedNoNewline(t *testing.T) {
 	now := time.Date(2026, 10, 23, 4, 0, 0, 0, time.UTC)
-	b := stderrBuffer{now: now}
+	b := stderrBuffer{now: func() time.Time { return now }}
 	for _, piece := range []string{"GitHub rate lim", "it; Retry-Af", "ter: 72", "00"} {
 		_, _ = b.Write([]byte(piece))
 	}
@@ -526,5 +526,18 @@ func TestRunStatusClassifiesLateSubprocessDiagnostic(t *testing.T) {
 	var limited *rateLimitError
 	if !errors.As(err, &limited) || limited.until.Before(before.Add(2*time.Hour)) {
 		t.Fatal(err)
+	}
+}
+
+func TestRetryAfterAnchorsAtDiagnosticObservation(t *testing.T) {
+	started := time.Date(2026, 10, 23, 5, 0, 0, 0, time.UTC)
+	now := started
+	b := stderrBuffer{now: func() time.Time { return now }}
+	_, _ = b.Write([]byte("slow collection debug output"))
+	now = started.Add(44 * time.Second)
+	_, _ = b.Write([]byte("\nGitHub rate limit; Retry-After: 7200\n"))
+	var limited *rateLimitError
+	if !errors.As(b.failure(errors.New("failed")), &limited) || limited.until.Before(now.Add(2*time.Hour)) {
+		t.Fatal("cooldown shortened by subprocess runtime", limited)
 	}
 }
