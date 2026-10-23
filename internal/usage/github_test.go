@@ -205,6 +205,7 @@ func TestGitHubStoreKeepsSameMonthReadingAndRecovers(t *testing.T) {
 	before, _ := json.Marshal(snapshot)
 	failing.Store(true)
 	for range 2 {
+		f.githubCache = nil // Simulate the next collection becoming due.
 		s.refresh(context.Background())
 		cached := find()
 		if cached.Error == "" || cached.Billing == nil || cached.Billing.GrossUSD != initial.Billing.GrossUSD || !cached.FetchedAt.Equal(initial.FetchedAt) {
@@ -216,6 +217,7 @@ func TestGitHubStoreKeepsSameMonthReadingAndRecovers(t *testing.T) {
 		t.Fatal("published snapshot changed")
 	}
 	failing.Store(false)
+	f.githubCache = nil
 	s.refresh(context.Background())
 	if recovered := find(); recovered.Error != "" || !recovered.FetchedAt.After(initial.FetchedAt) {
 		t.Fatal("did not recover", recovered)
@@ -225,6 +227,7 @@ func TestGitHubStoreKeepsSameMonthReadingAndRecovers(t *testing.T) {
 	old.Billing = &Billing{Month: time.Now().UTC().AddDate(0, 0, -40).Format("2006-01"), NetUSD: 99}
 	s.snapshot = Snapshot{Cards: []Card{old}}
 	failing.Store(true)
+	f.githubCache = nil
 	s.refresh(context.Background())
 	if failed := find(); failed.Error == "" || failed.Billing != nil {
 		t.Fatal("previous month retained", failed)
@@ -362,5 +365,63 @@ func TestGitHubConfiguredPolicyIsExplicitAndCannotSuppressCharges(t *testing.T) 
 				t.Fatal("configured policy hid actual usage or lost provenance", c)
 			}
 		})
+	}
+}
+
+func TestBillingCadence(t *testing.T) {
+	for _, status := range []int{200, 401, 403, 404, 429} {
+		t.Run(fmt.Sprint(status), func(t *testing.T) {
+			var calls atomic.Int32
+			fake := billingFake(t)
+			f := &Fetcher{githubRun: func(ctx context.Context, path string) (billingResponse, error) {
+				calls.Add(1)
+				if status != 200 {
+					return billingResponse{Status: status, RetryAt: billingNow.Add(time.Hour)}, errors.New("failed")
+				}
+				return fake(ctx, path)
+			}}
+			first := f.cachedGitHubBilling(context.Background(), "example-org", billingNow)
+			for minute := 1; minute < 15; minute++ {
+				cached := f.cachedGitHubBilling(context.Background(), "example-org", billingNow.Add(time.Duration(minute)*time.Minute))
+				if calls.Load() != 3 || !cached.FetchedAt.Equal(first.FetchedAt) || cached.Error != first.Error {
+					t.Fatal("collection repeated or cached card changed", calls.Load(), cached)
+				}
+			}
+			f.cachedGitHubBilling(context.Background(), "example-org", billingNow.Add(15*time.Minute))
+			want := int32(6)
+			if status == 429 {
+				want = 3
+			}
+			if calls.Load() != want {
+				t.Fatal("wrong interval/reset behavior", calls.Load())
+			}
+		})
+	}
+}
+
+func TestBillingIntervalClamp(t *testing.T) {
+	for _, tc := range []struct {
+		value string
+		want  time.Duration
+	}{
+		{"", 15 * time.Minute}, {"bad", 15 * time.Minute}, {"-1s", 15 * time.Minute},
+		{"1s", 15 * time.Minute}, {"30m", 30 * time.Minute},
+	} {
+		t.Setenv("GITHUB_BILLING_INTERVAL", tc.value)
+		if got := billingInterval(); got != tc.want {
+			t.Fatalf("%q: %v", tc.value, got)
+		}
+	}
+}
+
+func TestBillingCachedMonthBoundary(t *testing.T) {
+	t.Setenv("GITHUB_COPILOT_PAID_USAGE", "")
+	now := time.Date(2026, 10, 31, 23, 59, 0, 0, time.UTC)
+	f := &Fetcher{githubCache: map[string]billingCacheEntry{
+		"example-org:": {card: Card{Billing: &Billing{Month: "2026-10"}, FetchedAt: now}, next: now.Add(15 * time.Minute)},
+	}}
+	card := f.cachedGitHubBilling(context.Background(), "example-org", now.Add(2*time.Minute))
+	if card.Billing != nil || card.Error == "" || !card.FetchedAt.Equal(now.Add(2*time.Minute)) {
+		t.Fatal(card)
 	}
 }

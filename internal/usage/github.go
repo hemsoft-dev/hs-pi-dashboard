@@ -63,6 +63,50 @@ type billingRunner func(context.Context, string) (billingResponse, error)
 
 var orgPattern = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$`)
 
+const defaultBillingInterval = 15 * time.Minute
+
+type billingCacheEntry struct {
+	card Card
+	next time.Time
+}
+
+func billingInterval() time.Duration {
+	interval, err := time.ParseDuration(envValue("GITHUB_BILLING_INTERVAL"))
+	if err != nil {
+		return defaultBillingInterval
+	}
+	return max(interval, defaultBillingInterval)
+}
+
+// Concurrent refreshes share one collection. Published cards remain immutable.
+func (f *Fetcher) cachedGitHubBilling(ctx context.Context, org string, now time.Time) Card {
+	f.githubCacheMu.Lock()
+	defer f.githubCacheMu.Unlock()
+	key := strings.ToLower(org) + ":" + envValue("GITHUB_COPILOT_PAID_USAGE")
+	entry, ok := f.githubCache[key]
+	if ok && now.Before(entry.next) {
+		card := entry.card
+		if card.Billing != nil && card.Billing.Month != now.UTC().Format("2006-01") {
+			card.Billing = nil
+			card.FetchedAt = now
+			card.Error = "GitHub billing awaiting current UTC month collection"
+		}
+		return card
+	}
+	card := f.githubBilling(ctx, org, now)
+	next := now.Add(billingInterval())
+	f.githubRateMu.Lock()
+	if retry := f.githubRateUntil[org]; retry.After(next) {
+		next = retry
+	}
+	f.githubRateMu.Unlock()
+	if f.githubCache == nil {
+		f.githubCache = make(map[string]billingCacheEntry)
+	}
+	f.githubCache[key] = billingCacheEntry{card: card, next: next}
+	return card
+}
+
 // githubBilling uses gh's existing host configuration. Tokens are neither read
 // into the dashboard nor placed in command arguments or browser payloads.
 func (f *Fetcher) githubBilling(ctx context.Context, org string, now time.Time) Card {
