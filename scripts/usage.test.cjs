@@ -116,7 +116,7 @@ test('the board leads with the most urgent provider and states it in the section
   assert.ok(body.innerHTML.indexOf('>Codex<') < body.innerHTML.indexOf('>Antigravity<'));
   const ag = body.innerHTML.slice(body.innerHTML.indexOf('>Antigravity<'));
   assert.ok(ag.indexOf('Third-party · weekly') < ag.indexOf('Gemini · 5-hour'));
-  assert.match(summary.innerHTML, /<span class="uverdict s-risk">Codex weekly runs out in [^<]+ <span class="umore"><span class="usep">· <\/span>1 more at risk<\/span><\/span><span class="usr">, <\/span><span class="ufresh">updated now<\/span>/);
+  assert.match(summary.innerHTML, /<span class="uverdict s-risk">Codex weekly runs out in [^<]+ <span class="umore"><span class="usep">· <\/span>1 more at risk<\/span><\/span>(?:<span class="usus[^"]*"[^>]*>[^<]*<\/span>)?<span class="usr">, <\/span><span class="ufresh">updated now<\/span>/);
   assert.match(body.innerHTML, /class="ucols"/);
   assert.match(body.innerHTML, /<li class="urow s-risk ulead"><span class="uwin">Weekly/);
   assert.equal((body.innerHTML.match(/ulead/g) || []).length, 1);
@@ -171,7 +171,7 @@ test('account deduplication prefers healthy then fresh data and keeps collapse a
   r.lastFleet = fleet;
   r.renderUsage(fleet);
   assert.match(body.innerHTML, /aria-expanded="false" aria-controls="usage-card-global%3Acodex"/);
-  assert.match(body.innerHTML, /ugroup-sum s-out"><span>Weekly<\/span> <b>100% used ·<\/b> <span class="uphrase">limit reached<\/span><\/span>/);
+  assert.match(body.innerHTML, /ugroup-sum s-out"><span>Weekly<\/span> <b>100% used ·<\/b> (?:<span class="usus[^"]*"[^>]*>[^<]*<\/span> )?<span class="uphrase">limit reached<\/span><\/span>/);
   assert.doesNotMatch(body.innerHTML, /class="ucols"/);
   assert.match(body.innerHTML, /id="usage-card-global%3Acodex" hidden><\/ul>/);
   r.toggleCard('global', 'codex');
@@ -220,14 +220,14 @@ test('the header stamp describes the reading behind the verdict', () => {
   r.renderUsage(fleet(card({ gauges: [gauge(50, 125)], fetchedAt: old, error: 'timeout' })));
   assert.match(summary.innerHTML, /<span class="ufresh cached">refresh failed · cached 20m ago<\/span>/);
   r.renderUsage(fleet(card({ gauges: [gauge(20, 40)] })));
-  assert.match(summary.innerHTML, /all plans on pace<\/span><span class="usr">, <\/span><span class="ufresh">updated now<\/span>/);
+  assert.match(summary.innerHTML, /all plans on pace<\/span>(?:<span class="usus[^"]*"[^>]*>[^<]*<\/span>)?<span class="usr">, <\/span><span class="ufresh">updated now<\/span>/);
 });
 
 test('collapsed summaries show the forecast that drives their status', () => {
   const { r, body, storage } = renderer();
   storage.set('hs-pi-dashboard:card-collapsed:global:codex', '1');
   r.renderUsage({ machines: [{ usage: { cards: [card({ gauges: [gauge(20, 90)] })] } }] });
-  assert.match(body.innerHTML, /ugroup-sum s-tight"><span>Weekly<\/span> <b>20% used ·<\/b> <span>90% at reset ·<\/span> <span class="uphrase">near limit<\/span><\/span>/);
+  assert.match(body.innerHTML, /ugroup-sum s-tight"><span>Weekly<\/span> <b>20% used ·<\/b> <span>90% at reset ·<\/span> (?:<span class="usus[^"]*"[^>]*>[^<]*<\/span> )?<span class="uphrase">near limit<\/span><\/span>/);
 });
 
 test('verdicts without pace data keep their source and never claim on pace', () => {
@@ -235,7 +235,7 @@ test('verdicts without pace data keep their source and never claim on pace', () 
   const old = new Date(Date.now() - 20 * 60000).toISOString();
   const balance = card({ key: 'moonshot', label: 'Moonshot AI', kind: 'balance', gauges: undefined, balanceUsd: 5 });
   r.renderUsage({ machines: [{ usage: { cards: [card({ gauges: [gauge(null)], fetchedAt: old, error: 'timeout' }), balance] } }] });
-  assert.match(summary.innerHTML, /no quota readings<\/span><span class="usr">, <\/span><span class="ufresh cached">refresh failed · cached 20m ago/);
+  assert.match(summary.innerHTML, /no quota readings<\/span>(?:<span class="usus[^"]*"[^>]*>[^<]*<\/span>)?<span class="usr">, <\/span><span class="ufresh cached">refresh failed · cached 20m ago/);
   r.renderUsage({ machines: [{ usage: { cards: [card({ gauges: [{ label: 'Weekly', usedPercent: 10 }] }), balance] } }] });
   assert.match(summary.innerHTML, /uverdict s-unknown">no forecasts yet<\/span>/);
   assert.doesNotMatch(summary.innerHTML, /on pace/);
@@ -250,11 +250,11 @@ test('an empty quota verdict is stamped from the quota cards, not a balance', ()
   const old = new Date(Date.now() - 20 * 60000).toISOString();
   const balance = card({ key: 'moonshot', label: 'Moonshot AI', kind: 'balance', gauges: undefined, balanceUsd: 5 });
   r.renderUsage({ machines: [{ usage: { cards: [card({ gauges: undefined, error: 'parse failed', fetchedAt: old }), balance] } }] });
-  assert.match(summary.innerHTML, /no quota readings<\/span><span class="usr">, <\/span><span class="ufresh cached">refresh failed · 20m ago<\/span>/);
+  assert.match(summary.innerHTML, /no quota readings<\/span>(?:<span class="usus[^"]*"[^>]*>[^<]*<\/span>)?<span class="usr">, <\/span><span class="ufresh cached">refresh failed · 20m ago<\/span>/);
   r.renderUsage({ machines: [{ usage: { cards: [card({ gauges: [], fetchedAt: old }), balance] } }] });
   assert.match(summary.innerHTML, /<span class="ufresh stale">stale · 20m ago<\/span>/);
   r.renderUsage({ machines: [{ usage: { cards: [balance] } }] });
-  assert.match(summary.innerHTML, /no quota readings<\/span><span class="usr">, <\/span><span class="ufresh">updated now<\/span>/);
+  assert.match(summary.innerHTML, /no quota readings<\/span>(?:<span class="usus[^"]*"[^>]*>[^<]*<\/span>)?<span class="usr">, <\/span><span class="ufresh">updated now<\/span>/);
 });
 
 test('a refresh failure is stamped with the failed reading, not the oldest healthy one', () => {
@@ -319,7 +319,7 @@ test('all-disabled state survives reload and keeps every choice available withou
   r.renderUsage({ machines: [] });
   assert.match(body.innerHTML, /No providers selected.*Choose providers/);
   assert.equal(summary.textContent, 'no providers selected');
-  assert.equal((options.innerHTML.match(/type="checkbox"/g) || []).length, 6);
+  assert.equal((options.innerHTML.match(/type="checkbox"/g) || []).length, 7);
   assert.doesNotMatch(options.innerHTML, / checked/);
   const reload = renderer(storage);
   reload.r.renderUsage({});
@@ -405,4 +405,61 @@ test('billing alerts carry their own freshness alongside fresh quota',()=>{
  assert.match(summary.innerHTML,/stale · 20m ago/);
  r.renderUsage({machines:[{usage:{cards:[quota,{...billing,error:'access unavailable'}]}}]});
  assert.match(summary.innerHTML,/refresh failed · cached 20m ago/);
+});
+
+function scoredGauge(projected,ageHours=96,used=40,label='Weekly') {
+ return {label,usedPercent:used,projectedEnd:projected,windowSeconds:168*3600,resetAt:new Date(Date.now()+(168-ageHours)*H).toISOString()};
+}
+test('SUS follows shared projections, weekly age floor and band boundaries',()=>{
+ const {r}=renderer();
+ const at=new Date().toISOString();
+ for(const [projected,want] of [[0,0],[74,74],[75,75],[89,89],[90,90],[100,100]]) {
+  const w=r.windowState(scoredGauge(projected), 'Codex',at,'','codex');
+  assert.equal(w.sus,want);
+ }
+ const over=r.windowState(scoredGauge(132),'Codex',at,'','codex');
+ const expected=Math.round(100-100*(over.remaining-over.runsOutMs)/(168*H));
+ assert.equal(over.sus,expected);
+ assert.equal(r.windowState(scoredGauge(0,11),'Codex',at,'','codex').sus,null);
+ assert.equal(r.windowState({...scoredGauge(0,12),resetAt:new Date(Date.parse(at)+156*H).toISOString()},'Codex',at,'','codex').sus,0);
+ assert.equal(r.windowState(scoredGauge(90,96,40,'5h'),'Codex',at,'','codex').susEligible,false);
+ assert.equal(r.windowState(scoredGauge(90),'Codex',at,'failed','codex').sus,null);
+ assert.match(r.susMarkup(90),/usus green/);assert.match(r.susMarkup(75),/usus yellow/);assert.match(r.susMarkup(74),/usus red/);
+});
+test('Fleet SUS weights each subscription once and excludes unavailable scores',()=>{
+ const {r}=renderer();
+ const groups=[
+  {card:{key:'claude',subscriptionPriceUsd:200},windows:[{sus:100}]},
+  {card:{key:'codex',subscriptionPriceUsd:200},windows:[{sus:50}]},
+  {card:{key:'antigravity',subscriptionPriceUsd:19.99},windows:[{sus:80},{sus:100}]},
+ ];
+ assert.equal(r.fleetSubscriptionScore(groups),76);
+ groups[0].card.subscriptionPriceUsd=null;
+ assert.equal(r.fleetSubscriptionScore(groups),80);
+ groups[0].windows[0].sus=null;
+ assert.equal(r.fleetSubscriptionScore(groups),54);
+ assert.equal(r.fleetSubscriptionScore([]),null);
+});
+test('weekly SUS is shown next to bars, collapsed summaries and filtered fleet figure',()=>{
+ const {r,body,summary}=renderer();
+ r.setUsageProvider('claude',true);
+ const fleet={machines:[{usage:{cards:[card({gauges:[scoredGauge(90)]}),card({key:'claude',label:'Claude',gauges:[scoredGauge(50)]})]}}]};
+ r.renderUsage(fleet);
+ assert.match(body.innerHTML,/SUS 90/);assert.match(summary.innerHTML,/Fleet SUS 70/);
+ r.setUsageProvider('claude',false);r.renderUsage(fleet);
+ assert.match(summary.innerHTML,/Fleet SUS 90/);
+ r.lastFleet=fleet;r.toggleCard('global','codex');r.renderUsage(fleet);
+ assert.match(body.innerHTML,/ugroup-sum[^]*SUS 90/);
+});
+test('Grok aggregates observed seven-day turn IDs without inventing quota or SUS',()=>{
+ const {r,body}=renderer();
+ const at=new Date().toISOString();
+ const activity={sourcesAvailable:1,scope:'T3 + Grok CLI',events:[{id:'same',at}]};
+ const grok={key:'grok',label:'Grok / X',kind:'activity',fetchedAt:at,activity};
+ r.renderUsage({machines:[{usage:{cards:[grok]}},{usage:{cards:[{...grok,activity:{...activity,events:[{id:'same',at},{id:'old',at:'2020-01-01'}]}}]}}]});
+ assert.match(body.innerHTML,/1 turn\/7d/);
+ assert.match(body.innerHTML,/SUS n\/a/);
+ assert.doesNotMatch(body.innerHTML,/%|ubar/);
+ r.setUsageProvider('grok',false);r.renderUsage({machines:[{usage:{cards:[grok]}}]});
+ assert.doesNotMatch(body.innerHTML,/turn\/7d/);
 });

@@ -306,6 +306,58 @@ Check each agent's `/sessions` source health and the dashboard's `/api/fleet` pa
 The dashboard can be opened in T3's browser panel as an ordinary page. Merge and
 fleet installation are separate from implementing this collector.
 
+## Subscription utilization
+
+Weekly rows show Sub Utilization Score (SUS), from 0 to 100, next to their
+usage bars. Fleet SUS appears in the usage summary. A score of 100 means
+landing exactly at the weekly allowance at reset. Below 100% projected use,
+the score equals the projection. Above 100%, the score subtracts the share
+of the window spent locked out: 100 − 100 × max(time to reset − time to
+limit, 0) / window length. It uses the same projection and run-out instant as
+the bars. Scores are rounded to the nearest whole number, with green at 90+,
+yellow at 75–89, and red below 75.
+
+Claude Weekly, Codex Weekly, and Antigravity's independent Gemini, Argon and
+third-party weekly pools qualify. Five-hour windows do not get SUS. Windows
+younger than 12 hours at the reading's fetch time, missing forecasts and failed
+readings show n/a. Cached early readings cannot age into a score without a
+new sample. Expired windows also show n/a. Provider filters apply to Fleet SUS.
+
+Each provider's scored weekly buckets are averaged first, then that provider
+is weighted once. Current monthly weights are Claude $200, Codex $200 and
+Antigravity $19.99. If any scored provider has an unknown price, Fleet SUS uses
+equal provider weights. Providers with no score are excluded.
+
+Set `HS_PI_DASHBOARD_CLAUDE_PRICE_USD`, `HS_PI_DASHBOARD_CODEX_PRICE_USD`
+or `HS_PI_DASHBOARD_ANTIGRAVITY_PRICE_USD` to override a current price.
+Claude and Codex are planned to drop to $100 at their next billing periods.
+Record the actual dates with `HS_PI_DASHBOARD_CLAUDE_NEXT_PRICE_AT` and
+`HS_PI_DASHBOARD_CODEX_NEXT_PRICE_AT`, using RFC3339 timestamps including
+the time-zone offset. Until each configured date, its current price applies;
+afterward its next price defaults to $100. The corresponding
+`HS_PI_DASHBOARD_<PROVIDER>_NEXT_PRICE_USD` overrides that value. No billing
+date is guessed. Invalid price/date configuration makes the price unknown.
+
+Antigravity weekly groups come from the structured
+[`agy -p /usage --output-format json` command](https://www.antigravity.google/docs/cli/commands/usage/),
+requiring `num_turns: 0` and `command.name: usage`. Stable bucket IDs keep
+Gemini and Argon independent. The collector requires an existing CLI session
+and never starts sign-in when its session file is absent. Set
+`HS_PI_DASHBOARD_AGY_BIN` if the service cannot find the CLI. A 15-second
+deadline and 4 MiB output bound apply. When CLI usage is unavailable, legacy
+quota pools remain visible with an explicit warning and no SUS.
+
+Grok / X has no available quota data, so it shows observed turns over the last
+seven days and SUS n/a. Each agent reads only local turn IDs/timestamps from
+`~/.t3/userdata/statev2.sqlite` and `~/.grok/sessions/*/*/usage.json`.
+Set `HS_PI_DASHBOARD_GROK_T3_DB` for a different T3 database. Both SQLite
+and JSON sources are read only; no prompts or credentials enter the activity
+card. Hashed native turn identities deduplicate overlap between T3, the Grok
+CLI and reporting fleet agents. Coverage is limited to files currently present
+on reporting agents, with unavailable sources stated explicitly. Missing
+sources show activity unavailable rather than an invented zero or percentage.
+This is observed activity, not a subscription allowance.
+
 ## GitHub organization billing
 
 Set `GITHUB_BILLING_ORG=hemsoft-dev` in the agent service environment to add a
