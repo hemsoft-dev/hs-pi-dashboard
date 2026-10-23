@@ -425,3 +425,15 @@ func TestBillingCachedMonthBoundary(t *testing.T) {
 		t.Fatal(card)
 	}
 }
+
+func TestBillingCachedFailureMonthBoundary(t *testing.T) {
+	t.Setenv("GITHUB_COPILOT_PAID_USAGE", "")
+	now := time.Date(2026, 10, 31, 23, 59, 0, 0, time.UTC)
+	f := &Fetcher{githubCache: map[string]billingCacheEntry{
+		"example-org:": {card: Card{Error: "access unavailable", FetchedAt: now}, next: now.Add(time.Hour)},
+	}}
+	card := f.cachedGitHubBilling(context.Background(), "example-org", now.Add(2*time.Minute))
+	if card.Billing != nil || card.Error == "" || !card.FetchedAt.Equal(now.Add(2*time.Minute)) {
+		t.Fatal(card)
+	}
+}

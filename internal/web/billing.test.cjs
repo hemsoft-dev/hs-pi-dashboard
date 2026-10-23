@@ -39,3 +39,10 @@ test('seat charges cannot hide a newer AI-credit net or gross report',()=>{
   assert.equal(note[1],creditNetUsd?'ubilling-error':'ubilling-note');
  }
 });
+
+test('billing freshness follows its configured cadence with transport grace',()=>{
+ const fetchedAt=new Date(Date.now()-14*60000).toISOString();
+ assert.ok(!view.render({...card,fetchedAt,freshForSeconds:18*60}).includes('Stale reading'));
+ assert.ok(view.render({...card,fetchedAt:new Date(Date.now()-19*60000).toISOString(),freshForSeconds:18*60}).includes('Stale reading'));
+ assert.ok(!view.render({...card,fetchedAt:new Date(Date.now()-29*60000).toISOString(),freshForSeconds:33*60}).includes('Stale reading'));
+});

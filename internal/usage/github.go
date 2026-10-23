@@ -86,7 +86,7 @@ func (f *Fetcher) cachedGitHubBilling(ctx context.Context, org string, now time.
 	entry, ok := f.githubCache[key]
 	if ok && now.Before(entry.next) {
 		card := entry.card
-		if card.Billing != nil && card.Billing.Month != now.UTC().Format("2006-01") {
+		if card.FetchedAt.UTC().Format("2006-01") != now.UTC().Format("2006-01") {
 			card.Billing = nil
 			card.FetchedAt = now
 			card.Error = "GitHub billing awaiting current UTC month collection"
@@ -94,6 +94,7 @@ func (f *Fetcher) cachedGitHubBilling(ctx context.Context, org string, now time.
 		return card
 	}
 	card := f.githubBilling(ctx, org, now)
+	card.FreshForSeconds = (billingInterval() + 3*time.Minute).Seconds()
 	next := now.Add(billingInterval())
 	f.githubRateMu.Lock()
 	if retry := f.githubRateUntil[org]; retry.After(next) {

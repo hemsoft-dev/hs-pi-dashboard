@@ -366,3 +366,12 @@ test('healthy billing cannot hide failed or empty selected quota cards', () => {
   assert.match(summary.innerHTML,/uverdict s-risk/);assert.match(summary.innerHTML,/Quota not reporting: Codex/);assert.match(summary.innerHTML,/refresh failed/);
  }
 });
+
+test('billing header uses its cadence while quota freshness stays unchanged',()=>{
+ const {r}=renderer();
+ const at=new Date(Date.now()-14*60000).toISOString();
+ r.readings=[{fetchedAt:at,freshForSeconds:1080}];
+ assert.doesNotMatch(vm.runInContext('headerStamp(readings, readings)',r),/stale/);
+ r.readings=[{fetchedAt:at}];
+ assert.match(vm.runInContext('headerStamp(readings, readings)',r),/stale/);
+});

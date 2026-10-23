@@ -49,14 +49,15 @@ type Gauge struct {
 
 // Card is one provider's dashboard card.
 type Card struct {
-	Billing    *Billing  `json:"billing,omitempty"`
-	Key        string    `json:"key"`
-	Label      string    `json:"label"`
-	Kind       string    `json:"kind"`
-	BalanceUSD *float64  `json:"balanceUsd,omitempty"`
-	Gauges     []Gauge   `json:"gauges,omitempty"`
-	Error      string    `json:"error,omitempty"`
-	FetchedAt  time.Time `json:"fetchedAt"`
+	FreshForSeconds float64   `json:"freshForSeconds,omitempty"`
+	Billing         *Billing  `json:"billing,omitempty"`
+	Key             string    `json:"key"`
+	Label           string    `json:"label"`
+	Kind            string    `json:"kind"`
+	BalanceUSD      *float64  `json:"balanceUsd,omitempty"`
+	Gauges          []Gauge   `json:"gauges,omitempty"`
+	Error           string    `json:"error,omitempty"`
+	FetchedAt       time.Time `json:"fetchedAt"`
 }
 
 // Snapshot is what the agent /usage endpoint returns.
