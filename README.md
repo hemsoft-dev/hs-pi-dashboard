@@ -360,7 +360,9 @@ seven days and SUS n/a. Each agent reads only local turn IDs/timestamps from
 Set `HS_PI_DASHBOARD_GROK_T3_DB` for a different T3 database. Both SQLite
 and JSON sources are read only; no prompts or credentials enter the activity
 card. Hashed native turn identities deduplicate overlap between T3, the Grok
-CLI and reporting fleet agents. Coverage is limited to files currently present
+CLI and reporting fleet agents. Payload-only T3 drivers and native provider-thread
+identities are supported. Merged activity retains the oldest reporting timestamp
+and labels offline contributors. Coverage is limited to files currently present
 on reporting agents, with unavailable sources stated explicitly. Missing
 sources show activity unavailable rather than an invented zero or percentage.
 History collection is bounded to three seconds, 256 files, 4,096 directory

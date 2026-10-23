@@ -1090,10 +1090,13 @@ function renderUsage(fleet) {
       if (!usageProviderEnabled(reported.key)) continue;
       // Offline agents can retain old snapshots. Never let an error-free
       // previous-month report beat a current-month collection failure.
-      const c = reported.kind === "billing" && reported.billing
+      let c = reported.kind === "billing" && reported.billing
         && reported.billing.month !== new Date().toISOString().slice(0, 7)
         ? {...reported, billing: undefined, error: "GitHub billing awaiting current UTC month collection"}
         : reported;
+      if (c.kind === "activity" && m.online === false) {
+        c = {...c,error:[c.error,"Includes activity from an offline agent"].filter(Boolean).join("; ")};
+      }
       const prev = byKey.get(c.key);
       const better = !prev
         || (prev.error && !c.error)
@@ -1107,7 +1110,12 @@ function renderUsage(fleet) {
           const previous = events.get(event.id);
           if (!previous || at > Date.parse(previous.at)) events.set(event.id,event);
         }
-        byKey.set(c.key,{...c,fetchedAt:(Date.parse(prev.fetchedAt)>Date.parse(c.fetchedAt)?prev.fetchedAt:c.fetchedAt),
+        // The count depends on every reporting snapshot. A fresh agent must
+        // not conceal an older contributor or missing timestamp.
+        const previousAt = Date.parse(prev.fetchedAt), currentAt = Date.parse(c.fetchedAt);
+        const oldestAt = !Number.isFinite(previousAt) ? prev.fetchedAt
+          : !Number.isFinite(currentAt) ? c.fetchedAt : previousAt < currentAt ? prev.fetchedAt : c.fetchedAt;
+        byKey.set(c.key,{...c,fetchedAt:oldestAt,
           error:[prev.error,c.error].filter(Boolean).join("; "),
           activity:{...c.activity,sourcesAvailable:(prev.activity.sourcesAvailable || 0)+(c.activity.sourcesAvailable || 0),events:[...events.values()]}});
       } else if (better) byKey.set(c.key, c);

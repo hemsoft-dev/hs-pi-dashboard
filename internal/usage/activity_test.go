@@ -140,7 +140,7 @@ func TestGrokFinishedTurnsUseCompletionAcrossSevenDayCutoff(t *testing.T) {
 			var statements []string
 			switch layout {
 			case "payload":
-				statements = []string{"CREATE TABLE orchestration_v2_projection_provider_threads(provider_thread_id TEXT,driver TEXT,provider TEXT)", "CREATE TABLE orchestration_v2_projection_provider_turns(provider_thread_id TEXT,ordinal INTEGER,payload_json TEXT)", "INSERT INTO orchestration_v2_projection_provider_threads VALUES('pt','grok','grok')"}
+				statements = []string{"CREATE TABLE orchestration_v2_projection_provider_threads(provider_thread_id TEXT,driver TEXT,provider TEXT,payload_json TEXT)", "CREATE TABLE orchestration_v2_projection_provider_turns(provider_thread_id TEXT,ordinal INTEGER,payload_json TEXT)", "INSERT INTO orchestration_v2_projection_provider_threads VALUES('pt','grok','grok','{}')"}
 			default:
 				columns := ""
 				if layout == "native" {
@@ -172,6 +172,59 @@ func TestGrokFinishedTurnsUseCompletionAcrossSevenDayCutoff(t *testing.T) {
 				}
 			}); err != nil || count != 1 {
 				t.Fatal(err, count)
+			}
+		})
+	}
+}
+
+func TestGrokPayloadDriverAndNativeThreadIdentity(t *testing.T) {
+	for _, driver := range []string{`"driver":"grok",`, ``} {
+		t.Run(driver, func(t *testing.T) {
+			home := t.TempDir()
+			dir := filepath.Join(home, ".t3", "userdata")
+			if err := os.MkdirAll(dir, 0700); err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(dir, "statev2.sqlite")
+			db, err := sql.Open("sqlite", path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			for _, stmt := range []string{"CREATE TABLE orchestration_v2_projection_provider_threads(provider_thread_id TEXT,driver TEXT,provider TEXT,payload_json TEXT)", "CREATE TABLE orchestration_v2_projection_provider_turns(provider_thread_id TEXT,ordinal INTEGER,payload_json TEXT)"} {
+				if _, err := db.Exec(stmt); err != nil {
+					t.Fatal(err)
+				}
+			}
+			thread := `{` + driver + `"nativeThreadRef":{"driver":"grok","nativeId":"session"}}`
+			if _, err := db.Exec("INSERT INTO orchestration_v2_projection_provider_threads VALUES('internal',NULL,NULL,?)", thread); err != nil {
+				t.Fatal(err)
+			}
+			at := time.Now().UTC().Add(-time.Hour)
+			payload := fmt.Sprintf(`{"completedAt":%q}`, at.Format(time.RFC3339Nano))
+			if _, err := db.Exec("INSERT INTO orchestration_v2_projection_provider_turns VALUES('internal',1,?)", payload); err != nil {
+				t.Fatal(err)
+			}
+			count := 0
+			if err := readGrokTurns(context.Background(), path, time.Now().Add(-7*24*time.Hour), func(id string, _ time.Time) {
+				count++
+				if id != "session:turn:1" {
+					t.Fatal(id)
+				}
+			}); err != nil || count != 1 {
+				t.Fatal(err, count)
+			}
+			cli := filepath.Join(home, ".grok", "sessions", "workspace", "session")
+			if err := os.MkdirAll(cli, 0700); err != nil {
+				t.Fatal(err)
+			}
+			report := fmt.Sprintf(`{"sessionId":"session","turns":[{"turnNumber":1,"endedAt":%q}]}`, at.Format(time.RFC3339Nano))
+			if err := os.WriteFile(filepath.Join(cli, "usage.json"), []byte(report), 0600); err != nil {
+				t.Fatal(err)
+			}
+			card := (&Fetcher{Home: home}).grokActivity(context.Background())
+			if card.Error != "" || card.Activity.SourcesAvailable != 2 || len(card.Activity.Events) != 1 {
+				t.Fatal(card)
 			}
 		})
 	}

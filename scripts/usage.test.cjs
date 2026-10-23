@@ -520,3 +520,18 @@ test('fleet activity keeps the latest valid duplicate timestamp in either target
   assert.match(body.innerHTML,/1 turn\/7d/);
  }
 });
+
+test('activity unions retain oldest contributor freshness and offline coverage',()=>{
+ const {r,body}=renderer();
+ const now=Date.now(),at=new Date(now-H).toISOString(),fresh=new Date(now).toISOString();
+ const mk=(fetchedAt,sourcesAvailable,events,online=true)=>({online,usage:{cards:[{key:'grok',label:'Grok / X',kind:'activity',fetchedAt,activity:{sourcesAvailable,scope:'Observed',events}}]}});
+ const old=mk(at,1,[{id:'old',at}],false);
+ for(const current of [mk(fresh,0,[]),mk(fresh,1,[{id:'fresh',at:fresh}])]) {
+  for(const machines of [[old,current],[current,old]]) {
+   r.renderUsage({machines});
+   assert.match(body.innerHTML,/stale · 60m ago/);
+   assert.match(body.innerHTML,/offline agent/);
+   assert.doesNotMatch(body.innerHTML,/cached/);
+  }
+ }
+});

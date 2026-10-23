@@ -203,14 +203,15 @@ func readGrokTurns(ctx context.Context, path string, cutoff time.Time, add func(
 	 WHERE julianday(stamp) IS NULL OR julianday(stamp)>=julianday(?) LIMIT 10001`
 	if !hasStarted {
 		query = `WITH metadata AS (
-		 SELECT pt.provider_thread_id || ':turn:' || t.ordinal AS id,
+		 SELECT COALESCE(NULLIF(json_extract(pt.payload_json,'$.nativeThreadRef.nativeId'),''),pt.provider_thread_id) || ':turn:' || t.ordinal AS id,
 		 COALESCE(json_extract(t.payload_json,'$.nativeTurnRef.nativeId'),'') AS native,
 		 CASE WHEN julianday(json_extract(t.payload_json,'$.completedAt')) IS NOT NULL
 		 THEN json_extract(t.payload_json,'$.completedAt')
 		 ELSE COALESCE(json_extract(t.payload_json,'$.startedAt'),'') END AS stamp
 		 FROM orchestration_v2_projection_provider_turns t
 		 JOIN orchestration_v2_projection_provider_threads pt ON pt.provider_thread_id=t.provider_thread_id
-		 WHERE COALESCE(pt.driver,pt.provider)='grok')
+		 WHERE COALESCE(NULLIF(pt.driver,''),NULLIF(json_extract(pt.payload_json,'$.driver'),''),
+		 NULLIF(json_extract(pt.payload_json,'$.nativeThreadRef.driver'),''),pt.provider)='grok')
 		 SELECT id,native,stamp FROM metadata
 		 WHERE julianday(stamp) IS NULL OR julianday(stamp)>=julianday(?) LIMIT 10001`
 	}
