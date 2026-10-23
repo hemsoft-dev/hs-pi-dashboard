@@ -383,7 +383,9 @@ waits the full interval after the previous sweep completes. HTTP requests
 never launch scans. A GitHub rate-limit failure stops the remaining sweep:
 skipped checkouts retain their previous documents with an explicit rate-limit
 error. The next sweep waits at least the normal interval and any later reset
-deadline exposed by gh-x stderr through X-RateLimit-Reset or Retry-After seconds.
+deadline exposed by gh-x stderr or unavailable JSON section reasons through
+X-RateLimit-Reset or Retry-After seconds. A successful gh-x exit with a
+rate-limited section also stops the sweep.
 Without a reset deadline, the normal interval applies. Diagnostic stderr is
 bounded to 32 KiB and is never displayed verbatim; other failures retain the
 installation/authentication or invalid-document messages.

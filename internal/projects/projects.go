@@ -199,6 +199,9 @@ func (s *Store) refresh(ctx context.Context) {
 			r.Document, err = Parse(data)
 			if err != nil {
 				r.Error = err.Error()
+			} else if limited = documentRateLimit(r.Document, s.now()); limited != nil {
+				r.Error = limited.Error()
+				retryAt = maxTime(s.now().Add(s.every), limited.until)
 			}
 		}
 		if r.Error != "" {
@@ -297,6 +300,26 @@ func classifyStatusFailure(stderr []byte, original error, now time.Time) error {
 		until = time.Time{}
 	}
 	return &rateLimitError{until: until}
+}
+
+// gh-x preserves GitHub fetch failures in section metadata and can exit zero.
+// Classify only unavailable section reasons; all verdict policy stays in gh-x.
+func documentRateLimit(d *Document, now time.Time) *rateLimitError {
+	var result *rateLimitError
+	for _, section := range d.Sections {
+		if section.Status != "unavailable" {
+			continue
+		}
+		var limited *rateLimitError
+		if errors.As(classifyStatusFailure([]byte(section.Reason), errors.New("section unavailable"), now), &limited) {
+			if result == nil {
+				result = limited
+			} else {
+				result.until = maxTime(result.until, limited.until)
+			}
+		}
+	}
+	return result
 }
 
 type Local struct {

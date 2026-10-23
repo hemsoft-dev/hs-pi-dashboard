@@ -2,6 +2,7 @@ package projects
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -340,5 +341,88 @@ func TestRateLimitPathIsNotRateLimitFailure(t *testing.T) {
 	original := errors.New("exit status 1")
 	if got := classifyStatusFailure([]byte("checkout /tmp/flask_rate_limiter: missing extension"), original, time.Now()); got != original {
 		t.Fatal(got)
+	}
+}
+
+func TestSuccessfulProducerWithRateLimitedSectionsStopsSweep(t *testing.T) {
+	now := time.Date(2026, 10, 23, 4, 0, 0, 0, time.UTC)
+	s := New([]string{"a", "b", "c"}, 0)
+	s.now = func() time.Time { return now }
+	data := fixture(t)
+	s.run = func(context.Context, string) ([]byte, error) { return data, nil }
+	s.refresh(context.Background())
+	initial := s.Snapshot()
+	d, err := Parse(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.Sections[0].Status = "unavailable"
+	d.Sections[0].Reason = "GitHub rate limit; x-ratelimit-reset: 1792731600"
+	limitedJSON, err := json.Marshal(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	s.run = func(context.Context, string) ([]byte, error) { calls++; return limitedJSON, nil }
+	s.refresh(context.Background())
+	if calls != 1 || !s.retryAt.Equal(now.Add(time.Hour)) {
+		t.Fatal(calls, s.retryAt)
+	}
+	for i, r := range s.Snapshot().Results {
+		if !strings.Contains(r.Error, "rate limited") || r.Document != initial.Results[i].Document {
+			t.Fatal(r)
+		}
+	}
+	s.refresh(context.Background())
+	if calls != 1 {
+		t.Fatal("retried before reset")
+	}
+	now = now.Add(time.Hour)
+	s.run = func(context.Context, string) ([]byte, error) { calls++; return data, nil }
+	s.refresh(context.Background())
+	if calls != 4 || s.Snapshot().Results[0].Error != "" {
+		t.Fatal(calls, s.Snapshot())
+	}
+}
+
+func TestAvailableSectionsAndOtherFailuresKeepProducerBehavior(t *testing.T) {
+	d, err := Parse(fixture(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.Sections[0].Reason = "rate limit mentioned in available metadata"
+	if documentRateLimit(d, time.Now()) != nil {
+		t.Fatal("classified an available section")
+	}
+	d.Sections[0].Status = "unavailable"
+	d.Sections[0].Reason = "authentication failed"
+	if documentRateLimit(d, time.Now()) != nil {
+		t.Fatal("classified authentication failure")
+	}
+}
+
+// Captured from the installed gh-x v0.23.2 binary in an isolated HOME with a
+// rate-limited gh stub. gh-x exited 0 with empty stderr; see testdata provenance.
+func TestCapturedProducerRateLimitStopsSweep(t *testing.T) {
+	data, err := os.ReadFile("testdata/gh-x-v0.23.2-rate-limited.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := Parse(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := New([]string{"a", "b", "c"}, 0)
+	s.now = func() time.Time { return d.GeneratedAt }
+	calls := 0
+	s.run = func(context.Context, string) ([]byte, error) { calls++; return data, nil }
+	s.refresh(context.Background())
+	if calls != 1 || !s.retryAt.After(d.GeneratedAt) {
+		t.Fatal(calls, s.retryAt)
+	}
+	for _, r := range s.Snapshot().Results {
+		if !strings.Contains(r.Error, "rate limited") {
+			t.Fatal(r)
+		}
 	}
 }
