@@ -343,7 +343,9 @@ date is guessed. Invalid price/date configuration makes the price unknown.
 Antigravity weekly groups come from the structured
 [`agy -p /usage --output-format json` command](https://www.antigravity.google/docs/cli/commands/usage/),
 requiring `num_turns: 0` and `command.name: usage`. Stable bucket IDs keep
-Gemini and Argon independent. The collector requires an existing CLI session
+Gemini and Argon independent. The parser accepts the CLI print format
+`id`/`remaining_fraction`/`reset_time` and the quota API camelCase fields.
+Missing remaining fractions are unavailable rather than full usage. The collector requires an existing CLI session
 and never starts sign-in when its session file is absent. Set
 `HS_PI_DASHBOARD_AGY_BIN` if the service cannot find the CLI. A 15-second
 CLI deadline and 4 MiB output bound apply. The CLI and legacy HTTP fallback

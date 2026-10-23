@@ -101,3 +101,22 @@ func TestAntigravityCLIAndFallbackShareRefreshDeadline(t *testing.T) {
 		t.Fatal(called, card)
 	}
 }
+
+func TestAntigravityCLIPrintBucketsMatchChiefContract(t *testing.T) {
+	reset := time.Now().Add(72 * time.Hour).UTC().Format(time.RFC3339)
+	// The printmode producer uses id/remaining_fraction/reset_time. The raw
+	// quota API uses camelCase; Chief's pinned ag_gauges accepts both.
+	payload := `{"num_turns":0,"command":{"name":"usage","data":{"groups":[{"buckets":[{"id":"gemini-weekly","window":"weekly","remaining_fraction":0.8,"reset_time":"` + reset + `"},{"id":"gemini-argon-wtu-weekly","window":"weekly","remaining_fraction":0.3,"reset_time":"` + reset + `"}]}]}}}`
+	gauges, err := parseAntigravityCommand([]byte(payload))
+	if err != nil || len(gauges) != 2 || gauges[0].Label != "Gemini W" || *gauges[0].UsedPercent != 20 || gauges[1].Label != "Argon W" || *gauges[1].UsedPercent != 70 {
+		t.Fatal(gauges, err)
+	}
+	for _, fraction := range []string{`null`, `-0.1`, `1.1`} {
+		bad := strings.Replace(payload, `"remaining_fraction":0.8`, `"remaining_fraction":`+fraction, 1)
+		// The independent Argon reading remains; missing Gemini data is not 100%.
+		got, err := parseAntigravityCommand([]byte(bad))
+		if err != nil || len(got) != 1 || got[0].Label != "Argon W" {
+			t.Fatal(got, err)
+		}
+	}
+}

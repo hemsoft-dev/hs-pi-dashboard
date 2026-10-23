@@ -842,11 +842,36 @@ $bytes = New-Object byte[] $cred.CredentialBlobSize
 }
 
 type agBucket struct {
-	BucketID          string  `json:"bucketId"`
-	Window            string  `json:"window"`
-	Disabled          bool    `json:"disabled"`
-	RemainingFraction float64 `json:"remainingFraction"`
-	ResetTime         string  `json:"resetTime"`
+	BucketID          string   `json:"bucketId"`
+	Window            string   `json:"window"`
+	Disabled          bool     `json:"disabled"`
+	RemainingFraction *float64 `json:"remainingFraction"`
+	ResetTime         string   `json:"resetTime"`
+}
+
+// agy printmode uses snake_case; the quota endpoint uses camelCase.
+func (b *agBucket) UnmarshalJSON(data []byte) error {
+	type quotaBucket agBucket
+	var wire struct {
+		quotaBucket
+		ID        *string  `json:"id"`
+		Remaining *float64 `json:"remaining_fraction"`
+		Reset     *string  `json:"reset_time"`
+	}
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	*b = agBucket(wire.quotaBucket)
+	if wire.ID != nil {
+		b.BucketID = *wire.ID
+	}
+	if wire.Remaining != nil {
+		b.RemainingFraction = wire.Remaining
+	}
+	if wire.Reset != nil {
+		b.ResetTime = *wire.Reset
+	}
+	return nil
 }
 
 var agSpecs = []struct {
@@ -947,7 +972,7 @@ func parseAntigravityWindows(body []byte) ([]Gauge, error) {
 			continue
 		}
 		b := matches[0]
-		if b.Window != spec.window || b.Disabled || b.RemainingFraction < 0 || b.RemainingFraction > 1 {
+		if b.Window != spec.window || b.Disabled || b.RemainingFraction == nil || *b.RemainingFraction < 0 || *b.RemainingFraction > 1 {
 			continue
 		}
 		resetAt, err := time.Parse(time.RFC3339, b.ResetTime)
@@ -958,14 +983,14 @@ func parseAntigravityWindows(body []byte) ([]Gauge, error) {
 		if spec.window == "weekly" {
 			duration = 7 * 86400
 		}
-		value := math.Round(100*(1-b.RemainingFraction)*100) / 100
+		value := math.Round(100*(1-*b.RemainingFraction)*100) / 100
 		gauge := Gauge{
 			Label:         spec.label,
 			UsedPercent:   &value,
 			ResetAt:       resetAt.UTC(),
 			WindowSeconds: float64(duration),
 		}
-		if p, ok := projectEndPercent(spec.label, 100*(1-b.RemainingFraction),
+		if p, ok := projectEndPercent(spec.label, 100*(1-*b.RemainingFraction),
 			time.Until(resetAt).Seconds(), float64(duration), now, false); ok {
 			gauge.ProjectedEnd = &p
 		}
