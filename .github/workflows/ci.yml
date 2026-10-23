@@ -6,6 +6,9 @@ on:
     branches:
       - main
 
+env:
+  GOTOOLCHAIN: local
+
 jobs:
   platform:
     name: Go (${{ matrix.os }})
@@ -25,8 +28,14 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Report toolchain
+        run: go version
+
       - name: Install staticcheck
-        run: go install honnef.co/go/tools/cmd/staticcheck@v0.8.1
+        run: go install honnef.co/go/tools/cmd/staticcheck@v0.8.2
+
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
 
       - name: Build
         run: go build ./...
@@ -44,6 +53,9 @@ jobs:
 
       - name: Staticcheck
         run: staticcheck ./...
+
+      - name: Check reachable vulnerabilities
+        run: govulncheck ./...
 
       # Repository-wide checks need only one runner, alongside the Linux tests.
       - name: Check Go formatting
@@ -66,7 +78,7 @@ jobs:
 
       - name: Install deadcode
         if: runner.os == 'Linux'
-        run: go install golang.org/x/tools/cmd/deadcode@v0.49.0
+        run: go install golang.org/x/tools/cmd/deadcode@v0.52.0
 
       - name: Deadcode
         if: runner.os == 'Linux'

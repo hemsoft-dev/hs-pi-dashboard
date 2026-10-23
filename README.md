@@ -481,6 +481,12 @@ Missing/old agents report a Projects warning without affecting session or usage 
 
 ## Build
 
+Install the patch-level Go version declared in [go.mod](go.mod), or a newer
+stable release. CI reads that same minimum and uses the pinned version on each
+platform. Fleet builds verify the local toolchain with `GOTOOLCHAIN=local` and
+refuse older, development or unrecognized versions before compiling or replacing
+an artifact. Upgrade Go explicitly; the builder does not auto-download a toolchain.
+
 ```powershell
 go build ./...
 go test ./...
@@ -488,8 +494,10 @@ go test ./...
 
 CI builds, vets, staticchecks and tests natively on Windows, Linux and macOS
 arm64. Linux runs the full Go suite with the race detector, including its
-process-verification tests. Package execution is serialized with `-p 1` to keep
-bounded collector tests from competing with other test binaries. Go formatting, Node renderer tests, Python deployment
+process-verification tests. Every platform also runs pinned govulncheck v1.9.0
+on its native source configuration; reachable vulnerabilities fail CI. Package
+execution is serialized with `-p 1` to keep bounded collector tests from competing
+with other test binaries. Go formatting, Node renderer tests, Python deployment
 tests and deadcode run once on Linux. The stable `verify` check aggregates all
 three platform results; branch protection should require `verify`.
 
