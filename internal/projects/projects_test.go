@@ -3,6 +3,7 @@ package projects
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -315,5 +316,29 @@ func TestStderrIsBoundedAndDrained(t *testing.T) {
 	}
 	if b.Len() != 32<<10 {
 		t.Fatal(b.Len())
+	}
+}
+
+// Hide the source's WriterTo so io.Copy uses the same destination method
+// selection as os/exec's pipe reader. An embedded bytes.Buffer.ReadFrom
+// bypasses a capped Write and makes this regression fail.
+func TestSubprocessBuffersBoundedThroughCopy(t *testing.T) {
+	var stderr stderrBuffer
+	payload := strings.Repeat("x", 1<<20)
+	n, err := io.Copy(&stderr, struct{ io.Reader }{strings.NewReader(payload)})
+	if err != nil || n != int64(len(payload)) || stderr.Len() != 32<<10 {
+		t.Fatal(n, err, stderr.Len())
+	}
+	var stdout limitedBuffer
+	_, err = io.Copy(&stdout, struct{ io.Reader }{strings.NewReader(strings.Repeat(payload, 10))})
+	if err == nil || stdout.Len() > 8<<20 {
+		t.Fatal(err, stdout.Len())
+	}
+}
+
+func TestRateLimitPathIsNotRateLimitFailure(t *testing.T) {
+	original := errors.New("exit status 1")
+	if got := classifyStatusFailure([]byte("checkout /tmp/flask_rate_limiter: missing extension"), original, time.Now()); got != original {
+		t.Fatal(got)
 	}
 }

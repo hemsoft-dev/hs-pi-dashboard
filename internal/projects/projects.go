@@ -217,13 +217,16 @@ func (s *Store) refresh(ctx context.Context) {
 }
 
 // A bounded writer prevents runaway subprocess output from exhausting the agent.
-type limitedBuffer struct{ bytes.Buffer }
+type limitedBuffer struct{ buffer bytes.Buffer }
+
+func (b *limitedBuffer) Len() int      { return b.buffer.Len() }
+func (b *limitedBuffer) Bytes() []byte { return b.buffer.Bytes() }
 
 func (b *limitedBuffer) Write(p []byte) (int, error) {
 	if b.Len()+len(p) > 8<<20 {
 		return 0, errors.New("status output too large")
 	}
-	return b.Buffer.Write(p)
+	return b.buffer.Write(p)
 }
 func runStatus(ctx context.Context, path string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, githubcli.Binary(), "x", "status", "--json")
@@ -242,12 +245,15 @@ func runStatus(ctx context.Context, path string) ([]byte, error) {
 
 // Retain only a bounded diagnostic prefix, but drain all stderr so a verbose
 // child cannot block. Raw output never enters dashboard errors.
-type stderrBuffer struct{ bytes.Buffer }
+type stderrBuffer struct{ buffer bytes.Buffer }
+
+func (b *stderrBuffer) Len() int      { return b.buffer.Len() }
+func (b *stderrBuffer) Bytes() []byte { return b.buffer.Bytes() }
 
 func (b *stderrBuffer) Write(p []byte) (int, error) {
 	n := len(p)
 	if left := (32 << 10) - b.Len(); left > 0 {
-		_, _ = b.Buffer.Write(p[:min(left, len(p))])
+		_, _ = b.buffer.Write(p[:min(left, len(p))])
 	}
 	return n, nil
 }
@@ -272,7 +278,7 @@ func maxTime(a, b time.Time) time.Time {
 }
 func classifyStatusFailure(stderr []byte, original error, now time.Time) error {
 	message := strings.ToLower(string(stderr))
-	if !strings.Contains(message, "rate limit") && !strings.Contains(message, "rate_limit") &&
+	if !strings.Contains(message, "rate limit") && !strings.Contains(message, "rate_limit exceeded") && !strings.Contains(message, "rate_limit_exceeded") &&
 		!strings.Contains(message, "abuse detection") && !strings.Contains(message, "http 429") {
 		return original
 	}
