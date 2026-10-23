@@ -13,6 +13,9 @@ import (
 )
 
 func (f *Fetcher) antigravity(ctx context.Context) Card {
+	// CLI and HTTP fallback share one collection budget below firstRefreshWait.
+	ctx, cancel := context.WithTimeout(ctx, fetchTimeout)
+	defer cancel()
 	card := Card{Key: "antigravity", Label: "Antigravity", Kind: KindQuota, FetchedAt: time.Now()}
 	run := f.agyRun
 	if run == nil {
@@ -23,6 +26,10 @@ func (f *Fetcher) antigravity(ctx context.Context) Card {
 		card.Gauges, err = parseAntigravityCommand(data)
 	}
 	if err == nil {
+		return card
+	}
+	if ctx.Err() != nil {
+		card.Error = "antigravity refresh deadline exceeded"
 		return card
 	}
 	legacy := f.antigravityLegacy(ctx)

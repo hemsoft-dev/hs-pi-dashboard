@@ -60,3 +60,44 @@ func TestAntigravityLiveFallbackHasWarningWithoutRefreshError(t *testing.T) {
 		t.Fatal(card)
 	}
 }
+
+func TestAntigravityCLIAndFallbackShareRefreshDeadline(t *testing.T) {
+	home := t.TempDir()
+	auth := filepath.Join(home, ".pi", "agent")
+	if err := os.MkdirAll(auth, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(auth, "auth.json"), []byte(`{"antigravity":{"type":"oauth","access":"fixture"}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var deadline time.Time
+	called := false
+	f := &Fetcher{Home: home, agyRun: func(ctx context.Context) ([]byte, error) {
+		var ok bool
+		deadline, ok = ctx.Deadline()
+		if !ok || time.Until(deadline) > fetchTimeout || time.Until(deadline) <= 0 {
+			t.Fatal("missing refresh budget", deadline)
+		}
+		return nil, errors.New("CLI failed")
+	}, Client: &http.Client{Transport: usageRoundTripper(func(req *http.Request) (*http.Response, error) {
+		called = true
+		fallbackDeadline, ok := req.Context().Deadline()
+		if !ok || !fallbackDeadline.Equal(deadline) {
+			t.Fatal("fallback received a new budget", fallbackDeadline, deadline)
+		}
+		return nil, errors.New("fixture failure")
+	})}}
+	card := f.antigravity(context.Background())
+	if !called || card.Error == "" {
+		t.Fatal(called, card)
+	}
+	// An exhausted caller budget must not start a fallback request.
+	called = false
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	f.agyRun = func(ctx context.Context) ([]byte, error) { return nil, ctx.Err() }
+	card = f.antigravity(ctx)
+	if called || card.Error != "antigravity refresh deadline exceeded" {
+		t.Fatal(called, card)
+	}
+}

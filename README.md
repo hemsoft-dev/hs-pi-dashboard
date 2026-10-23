@@ -346,7 +346,8 @@ requiring `num_turns: 0` and `command.name: usage`. Stable bucket IDs keep
 Gemini and Argon independent. The collector requires an existing CLI session
 and never starts sign-in when its session file is absent. Set
 `HS_PI_DASHBOARD_AGY_BIN` if the service cannot find the CLI. A 15-second
-deadline and 4 MiB output bound apply. When CLI usage is unavailable, legacy
+CLI deadline and 4 MiB output bound apply. The CLI and legacy HTTP fallback
+share one 20-second refresh deadline. When CLI usage is unavailable, legacy
 quota pools remain visible with an explicit warning and no SUS. These are live
 readings, labeled separately from cached refresh failures. Grok coverage
 warnings also describe the current scan rather than cached quota data.

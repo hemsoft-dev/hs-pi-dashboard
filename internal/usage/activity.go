@@ -163,6 +163,7 @@ func readGrokTurns(ctx context.Context, path string, cutoff time.Time, add func(
 		return err
 	}
 	hasStarted := false
+	hasCompleted := false
 	for columns.Next() {
 		var cid, notnull, pk int
 		var name, kind string
@@ -170,6 +171,9 @@ func readGrokTurns(ctx context.Context, path string, cutoff time.Time, add func(
 		if err := columns.Scan(&cid, &name, &kind, &notnull, &def, &pk); err != nil {
 			columns.Close()
 			return err
+		}
+		if name == "completed_at" {
+			hasCompleted = true
 		}
 		if name == "started_at" {
 			hasStarted = true
@@ -180,23 +184,35 @@ func readGrokTurns(ctx context.Context, path string, cutoff time.Time, add func(
 		return err
 	}
 	columns.Close()
-	query := `SELECT t.provider_turn_id,
-	 COALESCE(json_extract(t.payload_json,'$.nativeTurnRef.nativeId'),''),
-	 t.started_at
+	// Finished turns belong to their completion time, matching CLI endedAt.
+	// Blank or invalid completion metadata falls back to the start timestamp.
+	completed := "json_extract(t.payload_json,'$.completedAt')"
+	if hasCompleted {
+		completed = "CASE WHEN julianday(t.completed_at) IS NOT NULL THEN t.completed_at ELSE " + completed + " END"
+	}
+	stamp := "CASE WHEN julianday(" + completed + ") IS NOT NULL THEN " + completed + " ELSE t.started_at END"
+	query := `WITH metadata AS (
+	 SELECT t.provider_turn_id AS id,
+	 COALESCE(json_extract(t.payload_json,'$.nativeTurnRef.nativeId'),'') AS native,
+	 ` + stamp + ` AS stamp
 	 FROM orchestration_v2_projection_provider_turns t
 	 JOIN orchestration_v2_projection_nodes n ON n.node_id=t.node_id
 	 JOIN orchestration_v2_projection_runs r ON r.run_id=n.run_id
-	 WHERE r.provider='grok' AND julianday(t.started_at)>=julianday(?) LIMIT 10001`
+	 WHERE r.provider='grok')
+	 SELECT id,native,stamp FROM metadata
+	 WHERE julianday(stamp) IS NULL OR julianday(stamp)>=julianday(?) LIMIT 10001`
 	if !hasStarted {
 		query = `WITH metadata AS (
 		 SELECT pt.provider_thread_id || ':turn:' || t.ordinal AS id,
 		 COALESCE(json_extract(t.payload_json,'$.nativeTurnRef.nativeId'),'') AS native,
-		 COALESCE(json_extract(t.payload_json,'$.startedAt'),json_extract(t.payload_json,'$.completedAt'),'') AS stamp
+		 CASE WHEN julianday(json_extract(t.payload_json,'$.completedAt')) IS NOT NULL
+		 THEN json_extract(t.payload_json,'$.completedAt')
+		 ELSE COALESCE(json_extract(t.payload_json,'$.startedAt'),'') END AS stamp
 		 FROM orchestration_v2_projection_provider_turns t
 		 JOIN orchestration_v2_projection_provider_threads pt ON pt.provider_thread_id=t.provider_thread_id
 		 WHERE COALESCE(pt.driver,pt.provider)='grok')
 		 SELECT id,native,stamp FROM metadata
-		 WHERE stamp='' OR julianday(stamp)>=julianday(?) LIMIT 10001`
+		 WHERE julianday(stamp) IS NULL OR julianday(stamp)>=julianday(?) LIMIT 10001`
 	}
 	rows, err := db.QueryContext(c, query, cutoff.UTC().Format(time.RFC3339Nano))
 	if err != nil {
