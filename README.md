@@ -613,6 +613,18 @@ No authentication by design: agents and the server bind to Tailscale
 interface addresses, so only tailnet devices (including iphone/ipad) can
 reach them. Add a shared token in v2 before any broader exposure.
 
+The public repository enables GitHub secret scanning and push protection for
+supported secret patterns, plus Dependabot alerts and security updates. Review
+alerts on the [repository security page](https://github.com/hemsoft-dev/hs-pi-dashboard/security).
+Revoke any exposed credential before resolving its alert; test fixtures require
+a documented false-positive or test-only reason.
+
+[Dependabot configuration](.github/dependabot.yml) checks Go modules and GitHub
+Actions weekly on Mondays at 04:00 US Eastern. Action updates retain full commit
+SHA pins and same-line `# vX.Y.Z` comments, which
+[the action pin guard](scripts/check-action-pins.sh) verifies against upstream
+tags. Update PRs must pass the existing CI and review gates before merge.
+
 ## Roadmap
 
 - [ ] v2: pi extension reporting live turn/tool events from running sessions
