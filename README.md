@@ -380,7 +380,13 @@ Each agent runs only its own configured checkouts,
 serially, with a 45-second deadline per checkout and an 8 MiB output limit.
 The default refresh is 30 minutes, with a minimum of 15 minutes. A new sweep
 waits the full interval after the previous sweep completes. HTTP requests
-never launch scans.
+never launch scans. A GitHub rate-limit failure stops the remaining sweep:
+skipped checkouts retain their previous documents with an explicit rate-limit
+error. The next sweep waits at least the normal interval and any later reset
+deadline exposed by gh-x stderr through X-RateLimit-Reset or Retry-After seconds.
+Without a reset deadline, the normal interval applies. Diagnostic stderr is
+bounded to 32 KiB and is never displayed verbatim; other failures retain the
+installation/authentication or invalid-document messages.
 
 Projects is **off by default**. Repeat `-project-path /absolute/checkout` for a
 short explicit list of active repositories; `-project-path off` disables it.

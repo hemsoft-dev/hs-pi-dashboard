@@ -210,3 +210,110 @@ func TestCancelledDisabledCollectorDoesNotPublishFreshness(t *testing.T) {
 		}
 	}
 }
+
+func TestRateLimitClassification(t *testing.T) {
+	now := time.Date(2026, 10, 23, 3, 0, 0, 0, time.UTC)
+	original := errors.New("transport failure")
+	for _, message := range []string{
+		"gh: API rate limit exceeded", "GraphQL: API rate limit already exceeded",
+		"secondary rate limit", "abuse detection mechanism", "HTTP 429", "rate_limit exceeded",
+	} {
+		var limited *rateLimitError
+		if !errors.As(classifyStatusFailure([]byte(message), original, now), &limited) {
+			t.Fatalf("not classified: %q", message)
+		}
+	}
+	if got := classifyStatusFailure([]byte("HTTP 403 missing authentication token=SECRET"), original, now); got != original {
+		t.Fatal(got)
+	}
+	err := classifyStatusFailure([]byte("rate limit exceeded token=SECRET\nX-RateLimit-Reset: 1792728000\nRetry-After: 7200"), original, now)
+	var limited *rateLimitError
+	if !errors.As(err, &limited) || !limited.until.Equal(now.Add(2*time.Hour)) || strings.Contains(err.Error(), "SECRET") {
+		t.Fatal(err)
+	}
+}
+
+func TestRateLimitedSweepRetainsDocumentsAndDelaysRetry(t *testing.T) {
+	now := time.Date(2026, 10, 23, 3, 0, 0, 0, time.UTC)
+	s := New([]string{"a", "b", "c"}, time.Minute)
+	s.now = func() time.Time { return now }
+	s.run = func(context.Context, string) ([]byte, error) { return fixture(t), nil }
+	s.refresh(context.Background())
+	initial := s.Snapshot()
+	calls := 0
+	s.run = func(context.Context, string) ([]byte, error) {
+		calls++
+		return nil, &rateLimitError{until: now.Add(time.Hour)}
+	}
+	s.refresh(context.Background())
+	if calls != 1 {
+		t.Fatal(calls)
+	}
+	for i, r := range s.Snapshot().Results {
+		if r.Document != initial.Results[i].Document || !strings.Contains(r.Error, "rate limited") {
+			t.Fatal(r)
+		}
+		if i > 0 && !strings.HasPrefix(r.Error, "skipped:") {
+			t.Fatal(r)
+		}
+	}
+	if s.nextDelay() != time.Hour {
+		t.Fatal(s.nextDelay())
+	}
+	s.refresh(context.Background())
+	if calls != 1 {
+		t.Fatal("retried before reset")
+	}
+	now = now.Add(time.Hour)
+	s.run = func(context.Context, string) ([]byte, error) { calls++; return fixture(t), nil }
+	s.refresh(context.Background())
+	if calls != 4 || s.Snapshot().Results[0].Error != "" {
+		t.Fatal(calls, s.Snapshot())
+	}
+	if initial.Results[0].Error != "" {
+		t.Fatal("published snapshot mutated")
+	}
+}
+
+func TestUnknownRateResetWaitsNormalIntervalAndOtherErrorsContinue(t *testing.T) {
+	now := time.Now()
+	s := New([]string{"a", "b"}, 0)
+	s.now = func() time.Time { return now }
+	calls := 0
+	s.run = func(context.Context, string) ([]byte, error) { calls++; return nil, &rateLimitError{} }
+	s.refresh(context.Background())
+	now = now.Add(s.every - time.Second)
+	s.refresh(context.Background())
+	if calls != 1 {
+		t.Fatal(calls)
+	}
+	now = now.Add(time.Second)
+	s.run = func(context.Context, string) ([]byte, error) { calls++; return nil, errors.New("missing gh-x") }
+	s.refresh(context.Background())
+	if calls != 3 {
+		t.Fatal(calls)
+	}
+	for _, r := range s.Snapshot().Results {
+		if !strings.Contains(r.Error, "installation") {
+			t.Fatal(r)
+		}
+	}
+	s.run = func(context.Context, string) ([]byte, error) { return []byte("invalid json"), nil }
+	s.refresh(context.Background())
+	if !strings.Contains(s.Snapshot().Results[0].Error, "invalid gh-x") {
+		t.Fatal(s.Snapshot())
+	}
+}
+
+func TestStderrIsBoundedAndDrained(t *testing.T) {
+	var b stderrBuffer
+	for range 10 {
+		data := make([]byte, 32<<10)
+		if n, err := b.Write(data); n != len(data) || err != nil {
+			t.Fatal(n, err)
+		}
+	}
+	if b.Len() != 32<<10 {
+		t.Fatal(b.Len())
+	}
+}
