@@ -239,18 +239,24 @@ func runStatus(ctx context.Context, path string) ([]byte, error) {
 	cmd.WaitDelay = time.Second
 	var out limitedBuffer
 	cmd.Stdout = &out
-	var stderr stderrBuffer
+	stderr := stderrBuffer{now: time.Now()}
 	cmd.Stderr = &stderr
 	err := cmd.Run()
 	if err != nil {
-		return out.Bytes(), classifyStatusFailure(stderr.Bytes(), err, time.Now())
+		return out.Bytes(), stderr.failure(err)
 	}
 	return out.Bytes(), nil
 }
 
 // Retain only a bounded diagnostic prefix, but drain all stderr so a verbose
 // child cannot block. Raw output never enters dashboard errors.
-type stderrBuffer struct{ buffer bytes.Buffer }
+type stderrBuffer struct {
+	buffer  bytes.Buffer
+	tail    []byte
+	now     time.Time
+	limited bool
+	until   time.Time
+}
 
 func (b *stderrBuffer) Len() int      { return b.buffer.Len() }
 func (b *stderrBuffer) Bytes() []byte { return b.buffer.Bytes() }
@@ -260,7 +266,40 @@ func (b *stderrBuffer) Write(p []byte) (int, error) {
 	if left := (32 << 10) - b.Len(); left > 0 {
 		_, _ = b.buffer.Write(p[:min(left, len(p))])
 	}
+	// Scan the complete stream in fixed-size pieces. The overlap recognizes
+	// diagnostics/headers split across writes without retaining verbose logs.
+	if b.now.IsZero() {
+		b.now = time.Now()
+	}
+	for len(p) > 0 {
+		size := min(len(p), 4096)
+		window := append(append([]byte(nil), b.tail...), p[:size]...)
+		b.observe(window, false)
+		b.tail = append(b.tail[:0], window[max(0, len(window)-256):]...)
+		p = p[size:]
+	}
 	return n, nil
+}
+
+func (b *stderrBuffer) observe(data []byte, final bool) {
+	for _, match := range rateLimitDiagnostic.FindAllIndex(data, -1) {
+		end := match[1]
+		last := data[end-1]
+		// A phrase at the current chunk edge needs its following delimiter
+		// before we know it is not part of a longer path or identifier.
+		if final || end < len(data) || strings.ContainsRune(" \t\r\n:;,.)\"'", rune(last)) {
+			b.limited = true
+		}
+	}
+	b.until = maxTime(b.until, rateDeadline(data, b.now, final))
+}
+
+func (b *stderrBuffer) failure(original error) error {
+	b.observe(b.tail, true)
+	if b.limited {
+		return &rateLimitError{until: b.until}
+	}
+	return original
 }
 
 type rateLimitError struct{ until time.Time }
@@ -286,21 +325,31 @@ func classifyStatusFailure(stderr []byte, original error, now time.Time) error {
 	if !rateLimitDiagnostic.Match(stderr) {
 		return original
 	}
+	return &rateLimitError{until: rateDeadline(stderr, now, true)}
+}
+
+func rateDeadline(data []byte, now time.Time, final bool) time.Time {
 	var until time.Time
-	for _, match := range resetHeader.FindAllSubmatch(stderr, -1) {
-		if seconds, err := strconv.ParseInt(string(match[1]), 10, 64); err == nil {
+	for _, match := range resetHeader.FindAllSubmatchIndex(data, -1) {
+		if !final && match[3] == len(data) {
+			continue
+		}
+		if seconds, err := strconv.ParseInt(string(data[match[2]:match[3]]), 10, 64); err == nil {
 			until = maxTime(until, time.Unix(seconds, 0))
 		}
 	}
-	for _, match := range retryHeader.FindAllSubmatch(stderr, -1) {
-		if seconds, err := strconv.ParseInt(string(match[1]), 10, 64); err == nil && seconds > 0 && seconds <= int64((time.Duration(1<<63-1))/time.Second) {
+	for _, match := range retryHeader.FindAllSubmatchIndex(data, -1) {
+		if !final && match[3] == len(data) {
+			continue
+		}
+		if seconds, err := strconv.ParseInt(string(data[match[2]:match[3]]), 10, 64); err == nil && seconds > 0 && seconds <= int64((time.Duration(1<<63-1))/time.Second) {
 			until = maxTime(until, now.Add(time.Duration(seconds)*time.Second))
 		}
 	}
 	if !until.After(now) {
-		until = time.Time{}
+		return time.Time{}
 	}
-	return &rateLimitError{until: until}
+	return until
 }
 
 // gh-x preserves GitHub fetch failures in section metadata and can exit zero.

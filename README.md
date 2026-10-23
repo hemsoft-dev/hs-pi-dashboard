@@ -387,7 +387,8 @@ deadline exposed by gh-x stderr or unavailable JSON section reasons through
 X-RateLimit-Reset or Retry-After seconds. A successful gh-x exit with a
 rate-limited section also stops the sweep.
 Without a reset deadline, the normal interval applies. Diagnostic stderr is
-bounded to 32 KiB and is never displayed verbatim; other failures retain the
+scanned while draining, with only a 32 KiB prefix and a small bounded overlap
+retained, and is never displayed verbatim; other failures retain the
 installation/authentication or invalid-document messages.
 
 Projects is **off by default**. Repeat `-project-path /absolute/checkout` for a

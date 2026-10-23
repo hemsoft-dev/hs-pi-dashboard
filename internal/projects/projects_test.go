@@ -476,3 +476,55 @@ func TestOrdinaryRateLimitWordsDoNotTriggerBackoff(t *testing.T) {
 		}
 	}
 }
+
+func TestRateDiagnosticsBeyondStderrPrefixAndAcrossWrites(t *testing.T) {
+	now := time.Date(2026, 10, 23, 4, 0, 0, 0, time.UTC)
+	message := "GitHub rate limit; X-RateLimit-Reset: 1792735200; Retry-After: 3600"
+	for split := 0; split <= len(message); split++ {
+		b := stderrBuffer{now: now}
+		_, _ = io.Copy(&b, struct{ io.Reader }{strings.NewReader(strings.Repeat("debug ", 10000))})
+		_, _ = b.Write([]byte(message[:split]))
+		_, _ = b.Write([]byte(message[split:]))
+		// Further logs cannot erase the observed failure or reset.
+		_, _ = b.Write([]byte(strings.Repeat("\nverbose", 10000)))
+		var limited *rateLimitError
+		if !errors.As(b.failure(errors.New("failed")), &limited) || !limited.until.Equal(now.Add(2*time.Hour)) || b.Len() != 32<<10 || len(b.tail) > 256 {
+			t.Fatal(split, limited, b.Len(), len(b.tail))
+		}
+	}
+}
+
+func TestStderrFinalDiagnosticAndHeaderNeedNoNewline(t *testing.T) {
+	now := time.Date(2026, 10, 23, 4, 0, 0, 0, time.UTC)
+	b := stderrBuffer{now: now}
+	for _, piece := range []string{"GitHub rate lim", "it; Retry-Af", "ter: 72", "00"} {
+		_, _ = b.Write([]byte(piece))
+	}
+	var limited *rateLimitError
+	if !errors.As(b.failure(errors.New("failure")), &limited) || !limited.until.Equal(now.Add(2*time.Hour)) {
+		t.Fatal(limited)
+	}
+}
+
+func TestMain(m *testing.M) {
+	if os.Getenv("HS_PROJECTS_TEST_PROCESS") == "late-rate-limit" {
+		_, _ = io.WriteString(os.Stderr, strings.Repeat("debug ", 10000)+"\nGitHub rate limit; Retry-After: 7200")
+		os.Exit(1)
+	}
+	os.Exit(m.Run())
+}
+
+func TestRunStatusClassifiesLateSubprocessDiagnostic(t *testing.T) {
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HS_PI_DASHBOARD_GH_BIN", executable)
+	t.Setenv("HS_PROJECTS_TEST_PROCESS", "late-rate-limit")
+	before := time.Now()
+	_, err = runStatus(context.Background(), t.TempDir())
+	var limited *rateLimitError
+	if !errors.As(err, &limited) || limited.until.Before(before.Add(2*time.Hour)) {
+		t.Fatal(err)
+	}
+}
