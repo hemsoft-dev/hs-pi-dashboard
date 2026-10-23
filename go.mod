@@ -1,6 +1,6 @@
 module github.com/HemSoft/hs-pi-dashboard
 
-go 1.26.4
+go 1.27.3
 
 require modernc.org/sqlite v1.58.0
 
