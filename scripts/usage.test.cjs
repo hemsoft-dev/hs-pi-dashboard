@@ -375,3 +375,34 @@ test('billing header uses its cadence while quota freshness stays unchanged',()=
  r.readings=[{fetchedAt:at}];
  assert.match(vm.runInContext('headerStamp(readings, readings)',r),/stale/);
 });
+
+test('fallback freshness consistently uses the newest balance reading',()=>{
+ const {r}=renderer();
+ const cards=[{fetchedAt:new Date(Date.now()-20*60000).toISOString()},{fetchedAt:new Date().toISOString()}];
+ assert.doesNotMatch(r.headerStamp([],cards), /stale/);
+ assert.match(r.headerStamp([],cards), /updated now/);
+});
+
+test('previous-month fleet billing cannot override a current-month failure',()=>{
+ const {r,body,summary}=renderer();
+ const oldMonth=new Date(Date.UTC(new Date().getUTCFullYear(),new Date().getUTCMonth()-1,1)).toISOString().slice(0,7);
+ const old={key:'github-billing:example-org',kind:'billing',label:'GitHub',fetchedAt:new Date(Date.now()-H).toISOString(),billing:{month:oldMonth,netUsd:999,products:[],budgets:[]}};
+ const current={...old,fetchedAt:new Date().toISOString(),billing:undefined,error:'awaiting current UTC month'};
+ for(const cards of [[old,current],[current,old],[old]]) {
+  r.renderUsage({machines:cards.map(c=>({usage:{cards:[c]}}))});
+  assert.doesNotMatch(body.innerHTML,/999/);
+  assert.match(body.innerHTML,/current UTC month/);
+  assert.match(summary.innerHTML,/unavailable/);
+ }
+ assert.equal(old.billing.netUsd,999);
+});
+
+test('billing alerts carry their own freshness alongside fresh quota',()=>{
+ const {r,summary}=renderer();
+ const billing={key:'github-billing:example-org',kind:'billing',label:'GitHub',freshForSeconds:1080,fetchedAt:new Date(Date.now()-20*60000).toISOString(),billing:{month:new Date().toISOString().slice(0,7),attention:true,products:[],budgets:[]}};
+ const quota=card({gauges:[gauge(20,40)]});
+ r.renderUsage({machines:[{usage:{cards:[quota,billing]}}]});
+ assert.match(summary.innerHTML,/stale · 20m ago/);
+ r.renderUsage({machines:[{usage:{cards:[quota,{...billing,error:'access unavailable'}]}}]});
+ assert.match(summary.innerHTML,/refresh failed · cached 20m ago/);
+});
