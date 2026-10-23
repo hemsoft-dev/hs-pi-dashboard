@@ -5,14 +5,14 @@ import (
 	"errors"
 	"net/url"
 	"os"
-	"os/exec"
+	osexec "os/exec"
 	"strconv"
 	"strings"
 	"time"
 )
 
 func processCreated(ctx context.Context, pid int) (time.Time, error) {
-	cmd := exec.CommandContext(ctx, "/bin/ps", "-p", strconv.Itoa(pid), "-o", "lstart=")
+	cmd := osexec.CommandContext(ctx, "/bin/ps", "-p", strconv.Itoa(pid), "-o", "lstart=")
 	cmd.Env = append(os.Environ(), "TZ=UTC", "LC_ALL=C")
 	data, err := cmd.Output()
 	if err != nil {
@@ -31,7 +31,7 @@ func verifyRuntimeProcess(ctx context.Context, pid int, started time.Time, origi
 		return err
 	}
 	// Output contains only PIDs, never process arguments or credentials.
-	cmd := exec.CommandContext(ctx, "/usr/sbin/lsof", "-t", "-a", "-p", strconv.Itoa(pid), "-iTCP:"+strconv.Itoa(port), "-sTCP:LISTEN")
+	cmd := osexec.CommandContext(ctx, "/usr/sbin/lsof", "-t", "-a", "-p", strconv.Itoa(pid), "-iTCP:"+strconv.Itoa(port), "-sTCP:LISTEN")
 	data, err := cmd.Output()
 	if err != nil || strings.TrimSpace(string(data)) != strconv.Itoa(pid) {
 		return errors.New("runtime listener changed")

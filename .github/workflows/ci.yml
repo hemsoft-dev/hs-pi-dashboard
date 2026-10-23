@@ -7,8 +7,14 @@ on:
       - main
 
 jobs:
-  verify:
-    runs-on: windows-latest
+  platform:
+    name: Go (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
 
     steps:
       - name: Check out
@@ -19,10 +25,8 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Install analysis tools
-        run: |
-          go install honnef.co/go/tools/cmd/staticcheck@v0.8.1
-          go install golang.org/x/tools/cmd/deadcode@v0.49.0
+      - name: Install staticcheck
+        run: go install honnef.co/go/tools/cmd/staticcheck@v0.8.1
 
       - name: Build
         run: go build ./...
@@ -31,16 +35,51 @@ jobs:
         run: go vet ./...
 
       - name: Test
+        if: runner.os != 'Linux'
         run: go test ./...
 
-      - name: Test dashboard renderers
-        run: node --test scripts/pulse.test.cjs scripts/sessions.test.cjs scripts/usage.test.cjs internal/web/herdr.test.cjs internal/web/projects.test.cjs internal/web/billing.test.cjs
-
-      - name: Test deployment binary checks
-        run: python -m unittest discover -s deploy -p test_build_fleet.py
+      - name: Test with race detector
+        if: runner.os == 'Linux'
+        run: go test -race -p 1 ./...
 
       - name: Staticcheck
         run: staticcheck ./...
 
+      # Repository-wide checks need only one runner, alongside the Linux tests.
+      - name: Check Go formatting
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          unformatted=$(gofmt -l .)
+          if [[ -n "$unformatted" ]]; then
+            printf '%s\n' "$unformatted"
+            exit 1
+          fi
+
+      - name: Test dashboard renderers
+        if: runner.os == 'Linux'
+        run: node --test scripts/pulse.test.cjs scripts/sessions.test.cjs scripts/usage.test.cjs internal/web/herdr.test.cjs internal/web/projects.test.cjs internal/web/billing.test.cjs
+
+      - name: Test deployment binary checks
+        if: runner.os == 'Linux'
+        run: python3 -m unittest discover -s deploy -p test_build_fleet.py
+
+      - name: Install deadcode
+        if: runner.os == 'Linux'
+        run: go install golang.org/x/tools/cmd/deadcode@v0.49.0
+
       - name: Deadcode
+        if: runner.os == 'Linux'
         run: deadcode ./...
+
+  # Keep the existing required status stable; it succeeds only when all legs do.
+  verify:
+    if: ${{ always() }}
+    needs: platform
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every platform
+        env:
+          PLATFORM_RESULT: ${{ needs.platform.result }}
+        run: test "$PLATFORM_RESULT" = success

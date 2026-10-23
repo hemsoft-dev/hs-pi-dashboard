@@ -486,6 +486,13 @@ go build ./...
 go test ./...
 ```
 
+CI builds, vets, staticchecks and tests natively on Windows, Linux and macOS
+arm64. Linux runs the full Go suite with the race detector, including its
+process-verification tests. Package execution is serialized with `-p 1` to keep
+bounded collector tests from competing with other test binaries. Go formatting, Node renderer tests, Python deployment
+tests and deadcode run once on Linux. The stable `verify` check aggregates all
+three platform results; branch protection should require `verify`.
+
 Cross-compile for the fleet with explicit OS and architecture targets. The
 builder checks each binary's format and architecture before replacing an
 existing artifact. It also keeps Windows build processes hidden.
