@@ -499,7 +499,17 @@ on its native source configuration; reachable vulnerabilities fail CI. Package
 execution is serialized with `-p 1` to keep bounded collector tests from competing
 with other test binaries. Go formatting, Node renderer tests, Python deployment
 tests and deadcode run once on Linux. The stable `verify` check aggregates all
-three platform results; branch protection should require `verify`.
+three platform results. The [main ruleset](https://github.com/hemsoft-dev/hs-pi-dashboard/rules/25751504)
+requires `verify` from GitHub Actions on an up-to-date branch before merging.
+Main changes must go through a pull request; no formal approval count is
+required. Force pushes and deletion are blocked, and there are no bypass actors,
+including administrators. The existing clean-current-head Codex review policy
+still applies to automation.
+
+The versioned [ruleset payload](.github/rulesets/main.json) records the policy.
+Repository administrators manage the live ruleset through GitHub's rules API or
+settings. If CI job names change, update the required check in both the payload
+and live ruleset in the same change.
 
 Cross-compile for the fleet with explicit OS and architecture targets. The
 builder checks each binary's format and architecture before replacing an
