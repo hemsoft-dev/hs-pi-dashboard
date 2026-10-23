@@ -469,6 +469,7 @@ function windowState(g, provider, fetchedAt, cardError = "", providerKey = "") {
   const remaining = remainingMs(g.resetAt);
   let status = "unknown";
   let runsOutMs = null;
+  let runsOutAt = null;
   if (used != null) {
     if (used >= 100) status = "out";
     else if (projected != null && projected > 100) {
@@ -478,11 +479,12 @@ function windowState(g, provider, fetchedAt, cardError = "", providerKey = "") {
       const from = Number.isFinite(fetched) && fetched <= Date.now() ? fetched : Date.now();
       const horizon = resetAt - from;
       if (remaining != null && Number.isFinite(horizon) && horizon > 0 && projected > used) {
-        runsOutMs = Math.max(0, from + ((100 - used) * horizon) / (projected - used) - Date.now());
+        runsOutAt = from + ((100 - used) * horizon) / (projected - used);
+        runsOutMs = Math.max(0, runsOutAt - Date.now());
       }
     } else status = used >= 85 || (projected ?? 0) >= 85 ? "tight" : "ok";
   }
-  const result = { provider, raw: g.label, label: windowLabel(g.label), used, projected, remaining, status, runsOutMs, fetchedAt, cardError };
+  const result = { provider, raw: g.label, label: windowLabel(g.label), used, projected, remaining, status, runsOutMs, runsOutAt, fetchedAt, cardError };
   result.susEligible = ["claude","codex","antigravity"].includes(providerKey || String(provider).toLowerCase())
     && windowName(g.label).period === "weekly"
     && ((providerKey || String(provider).toLowerCase()) === "antigravity" || String(g.label).toLowerCase() === "weekly");
@@ -501,9 +503,9 @@ function subscriptionScore(g,w) {
   const elapsed = seconds - (reset-fetched)/1000;
   if (elapsed < 12*3600 || elapsed > seconds) return null;
   if (w.projected <= 100) return Math.round(Math.max(0,w.projected));
-  const out = w.used >= 100 ? 0 : w.runsOutMs;
-  if (out == null || w.remaining == null) return null;
-  return Math.round(Math.max(0,Math.min(100,100-100*Math.max(w.remaining-out,0)/(seconds*1000))));
+  const outAt = w.used >= 100 ? fetched : w.runsOutAt;
+  if (outAt == null) return null;
+  return Math.round(Math.max(0,Math.min(100,100-100*Math.max(reset-outAt,0)/(seconds*1000))));
 }
 function susMarkup(score,label="SUS",reason="Not enough weekly history or no quota evidence") {
   const band = score == null ? "na" : score >= 90 ? "green" : score >= 75 ? "yellow" : "red";

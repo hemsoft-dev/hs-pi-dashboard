@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
@@ -31,6 +32,8 @@ type Activity struct {
 // Only local turn identities/timestamps are read. No prompts, tokens or quota
 // estimates are collected. Hashes let the fleet deduplicate shared native turns.
 func (f *Fetcher) grokActivity(ctx context.Context) Card {
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
 	now := time.Now()
 	card := Card{Key: "grok", Label: "Grok / X", Kind: "activity", FetchedAt: now}
 	events := map[string]ActivityEvent{}
@@ -41,11 +44,11 @@ func (f *Fetcher) grokActivity(ctx context.Context) Card {
 		if id == "" || at.Before(cutoff) || at.After(now) {
 			return
 		}
-		if len(events) >= 10000 {
+		hash := fmt.Sprintf("%x", sha256.Sum256([]byte("grok:"+id)))
+		if _, exists := events[hash]; !exists && len(events) >= 10000 {
 			truncated = true
 			return
 		}
-		hash := fmt.Sprintf("%x", sha256.Sum256([]byte("grok:"+id)))
 		events[hash] = ActivityEvent{ID: hash, At: at}
 	}
 	var failures []string
@@ -58,12 +61,20 @@ func (f *Fetcher) grokActivity(ctx context.Context) Card {
 	} else {
 		sources++
 	}
-	paths, err := filepath.Glob(filepath.Join(f.Home, ".grok", "sessions", "*", "*", "usage.json"))
+	paths, bounded, err := grokUsageFiles(ctx, filepath.Join(f.Home, ".grok", "sessions"))
+	if bounded {
+		failures = append(failures, "Grok CLI history scan limited")
+	}
 	if err != nil || len(paths) == 0 {
 		failures = append(failures, "Grok CLI activity unavailable")
 	}
 	cliAvailable := false
+	remainingBytes := 16 << 20
 	for _, path := range paths {
+		if remainingBytes <= 0 || truncated {
+			failures = append(failures, "Grok CLI history scan limited")
+			break
+		}
 		if ctx.Err() != nil {
 			failures = append(failures, "activity collection cancelled")
 			break
@@ -73,8 +84,9 @@ func (f *Fetcher) grokActivity(ctx context.Context) Card {
 			failures = append(failures, "Grok CLI activity unreadable")
 			continue
 		}
-		data, err := io.ReadAll(io.LimitReader(file, (4<<20)+1))
+		data, err := io.ReadAll(io.LimitReader(file, int64(min(4<<20, remainingBytes)+1)))
 		_ = file.Close()
+		remainingBytes -= len(data)
 		if err != nil || len(data) > 4<<20 {
 			failures = append(failures, "Grok CLI activity unreadable")
 			continue
@@ -142,13 +154,49 @@ func readGrokTurns(ctx context.Context, path string, cutoff time.Time, add func(
 	defer db.Close()
 	c, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
-	rows, err := db.QueryContext(c, `SELECT t.provider_turn_id,
+	// The newer projection uses native turn columns. Older supported V2
+	// schemas retain turn metadata in payload_json and link via provider thread.
+	columns, err := db.QueryContext(c, "PRAGMA table_info(orchestration_v2_projection_provider_turns)")
+	if err != nil {
+		return err
+	}
+	hasStarted := false
+	for columns.Next() {
+		var cid, notnull, pk int
+		var name, kind string
+		var def any
+		if err := columns.Scan(&cid, &name, &kind, &notnull, &def, &pk); err != nil {
+			columns.Close()
+			return err
+		}
+		if name == "started_at" {
+			hasStarted = true
+		}
+	}
+	if err := columns.Err(); err != nil {
+		columns.Close()
+		return err
+	}
+	columns.Close()
+	query := `SELECT t.provider_turn_id,
 	 COALESCE(json_extract(t.payload_json,'$.nativeTurnRef.nativeId'),''),
 	 t.started_at
 	 FROM orchestration_v2_projection_provider_turns t
 	 JOIN orchestration_v2_projection_nodes n ON n.node_id=t.node_id
 	 JOIN orchestration_v2_projection_runs r ON r.run_id=n.run_id
-	 WHERE r.provider='grok' AND julianday(t.started_at)>=julianday(?)`, cutoff.UTC().Format(time.RFC3339Nano))
+	 WHERE r.provider='grok' AND julianday(t.started_at)>=julianday(?) LIMIT 10001`
+	if !hasStarted {
+		query = `WITH metadata AS (
+		 SELECT pt.provider_thread_id || ':turn:' || t.ordinal AS id,
+		 COALESCE(json_extract(t.payload_json,'$.nativeTurnRef.nativeId'),'') AS native,
+		 COALESCE(json_extract(t.payload_json,'$.startedAt'),json_extract(t.payload_json,'$.completedAt'),'') AS stamp
+		 FROM orchestration_v2_projection_provider_turns t
+		 JOIN orchestration_v2_projection_provider_threads pt ON pt.provider_thread_id=t.provider_thread_id
+		 WHERE COALESCE(pt.driver,pt.provider)='grok')
+		 SELECT id,native,stamp FROM metadata
+		 WHERE stamp='' OR julianday(stamp)>=julianday(?) LIMIT 10001`
+	}
+	rows, err := db.QueryContext(c, query, cutoff.UTC().Format(time.RFC3339Nano))
 	if err != nil {
 		return err
 	}
@@ -160,7 +208,7 @@ func readGrokTurns(ctx context.Context, path string, cutoff time.Time, add func(
 		}
 		at, err := time.Parse(time.RFC3339Nano, stamp)
 		if err != nil {
-			continue
+			return errors.New("T3 activity timestamp unavailable")
 		}
 		if native != "" {
 			id = native
@@ -168,4 +216,55 @@ func readGrokTurns(ctx context.Context, path string, cutoff time.Time, add func(
 		add(id, at)
 	}
 	return rows.Err()
+}
+
+// Stream directory entries rather than globbing an unbounded retained history.
+// Session layout is workspace/session/usage.json; symlink directories are skipped.
+func grokUsageFiles(ctx context.Context, root string) ([]string, bool, error) {
+	var paths []string
+	entries := 0
+	bounded := false
+	var walk func(string, int) error
+	walk = func(dir string, depth int) error {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		f, err := os.Open(dir)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		for {
+			batch, err := f.ReadDir(32)
+			for _, entry := range batch {
+				entries++
+				if entries > 4096 || len(paths) >= 256 {
+					bounded = true
+					return nil
+				}
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
+				path := filepath.Join(dir, entry.Name())
+				if entry.IsDir() && depth < 2 {
+					if err := walk(path, depth+1); err != nil {
+						return err
+					}
+					if bounded {
+						return nil
+					}
+				} else if depth == 2 && entry.Name() == "usage.json" && entry.Type().IsRegular() {
+					paths = append(paths, path)
+				}
+			}
+			if err == io.EOF {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+		}
+	}
+	err := walk(root, 0)
+	return paths, bounded, err
 }

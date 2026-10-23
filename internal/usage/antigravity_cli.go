@@ -41,7 +41,7 @@ func parseAntigravityCommand(data []byte) ([]Gauge, error) {
 		} `json:"command"`
 	}
 	if json.Unmarshal(data, &response) != nil || response.Turns == nil || *response.Turns != 0 || response.Command.Name != "usage" {
-		return nil, errors.New("Antigravity usage command unavailable")
+		return nil, errors.New("antigravity usage command unavailable")
 	}
 	return parseAntigravityWindows(response.Command.Data)
 }
@@ -59,7 +59,7 @@ func (b *usageCommandBuffer) Write(data []byte) (int, error) {
 func (f *Fetcher) runAntigravityUsage(ctx context.Context) ([]byte, error) {
 	// Never initiate a CLI sign-in from a background collector.
 	if _, err := os.Stat(filepath.Join(f.Home, ".gemini", "antigravity-cli", "antigravity-oauth-token")); err != nil {
-		return nil, errors.New("Antigravity CLI session unavailable")
+		return nil, errors.New("antigravity CLI session unavailable")
 	}
 	bin := envValue("HS_PI_DASHBOARD_AGY_BIN")
 	if bin == "" {
@@ -78,7 +78,7 @@ func (f *Fetcher) runAntigravityUsage(ctx context.Context) ([]byte, error) {
 	var out usageCommandBuffer
 	cmd.Stdout = &out
 	if err := cmd.Run(); err != nil {
-		return nil, errors.New("Antigravity usage command failed")
+		return nil, errors.New("antigravity usage command failed")
 	}
 	return out.buffer.Bytes(), nil
 }

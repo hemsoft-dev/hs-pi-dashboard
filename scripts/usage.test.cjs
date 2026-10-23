@@ -463,3 +463,16 @@ test('Grok aggregates observed seven-day turn IDs without inventing quota or SUS
  r.setUsageProvider('grok',false);r.renderUsage({machines:[{usage:{cards:[grok]}}]});
  assert.doesNotMatch(body.innerHTML,/turn\/7d/);
 });
+
+test('cached SUS preserves lockout already elapsed after projected run-out',()=>{
+ const {r}=renderer();
+ const now=Date.now();
+ const at=new Date(now-96*H).toISOString();
+ const g={label:'Weekly',usedPercent:60,projectedEnd:300,windowSeconds:168*3600,resetAt:new Date(now+24*H).toISOString()};
+ const first=r.windowState(g,'Codex',at,'','codex');
+ assert.equal(first.runsOutMs,0);
+ assert.equal(first.sus,40);
+ r.fixedNow=now+H;
+ vm.runInContext('Date.now=()=>fixedNow',r);
+ assert.equal(r.windowState(g,'Codex',at,'','codex').sus,40);
+});

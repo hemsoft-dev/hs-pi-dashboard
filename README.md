@@ -314,7 +314,8 @@ landing exactly at the weekly allowance at reset. Below 100% projected use,
 the score equals the projection. Above 100%, the score subtracts the share
 of the window spent locked out: 100 − 100 × max(time to reset − time to
 limit, 0) / window length. It uses the same projection and run-out instant as
-the bars. Scores are rounded to the nearest whole number, with green at 90+,
+the bars, preserving the full projected lockout interval when cached data
+ages beyond that instant. Scores are rounded to the nearest whole number, with green at 90+,
 yellow at 75–89, and red below 75.
 
 Claude Weekly, Codex Weekly, and Antigravity's independent Gemini, Argon and
@@ -356,7 +357,12 @@ card. Hashed native turn identities deduplicate overlap between T3, the Grok
 CLI and reporting fleet agents. Coverage is limited to files currently present
 on reporting agents, with unavailable sources stated explicitly. Missing
 sources show activity unavailable rather than an invented zero or percentage.
-This is observed activity, not a subscription allowance.
+History collection is bounded to three seconds, 256 files, 4,096 directory
+entries and 16 MiB of aggregate JSON per refresh, with at most 10,000 retained
+turns. A bound reached is reported as partial coverage. Supported T3 V2
+layouts use native turn columns or provider-thread metadata with explicit
+turn timestamps; missing timestamps are reported as unavailable. This is
+observed activity, not a subscription allowance.
 
 ## GitHub organization billing
 
