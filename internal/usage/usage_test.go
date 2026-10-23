@@ -278,3 +278,12 @@ func TestRefreshRetainsOriginalReadingOnFailuresAndRecovers(t *testing.T) {
 		t.Fatalf("requests=%d", codexRequests.Load())
 	}
 }
+
+func TestAntigravityArgonIsIndependentWeeklyBucket(t *testing.T) {
+	reset := time.Now().Add(72 * time.Hour).UTC().Format(time.RFC3339)
+	body := []byte(`{"groups":[{"buckets":[{"bucketId":"gemini-weekly","window":"weekly","remainingFraction":0.8,"resetTime":"` + reset + `"},{"bucketId":"gemini-argon-wtu-weekly","window":"weekly","remainingFraction":0.3,"resetTime":"` + reset + `"}]}]}`)
+	gauges, err := parseAntigravityWindows(body)
+	if err != nil || len(gauges) != 2 || gauges[0].Label != "Gemini W" || gauges[1].Label != "Argon W" || *gauges[1].UsedPercent != 70 {
+		t.Fatal(gauges, err)
+	}
+}

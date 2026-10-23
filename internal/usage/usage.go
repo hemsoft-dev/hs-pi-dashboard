@@ -49,15 +49,18 @@ type Gauge struct {
 
 // Card is one provider's dashboard card.
 type Card struct {
-	FreshForSeconds float64   `json:"freshForSeconds,omitempty"`
-	Billing         *Billing  `json:"billing,omitempty"`
-	Key             string    `json:"key"`
-	Label           string    `json:"label"`
-	Kind            string    `json:"kind"`
-	BalanceUSD      *float64  `json:"balanceUsd,omitempty"`
-	Gauges          []Gauge   `json:"gauges,omitempty"`
-	Error           string    `json:"error,omitempty"`
-	FetchedAt       time.Time `json:"fetchedAt"`
+	SubscriptionPriceUSD *float64  `json:"subscriptionPriceUsd"`
+	Activity             *Activity `json:"activity,omitempty"`
+	FreshForSeconds      float64   `json:"freshForSeconds,omitempty"`
+	Billing              *Billing  `json:"billing,omitempty"`
+	Key                  string    `json:"key"`
+	Label                string    `json:"label"`
+	Kind                 string    `json:"kind"`
+	BalanceUSD           *float64  `json:"balanceUsd,omitempty"`
+	Gauges               []Gauge   `json:"gauges,omitempty"`
+	Warning              string    `json:"warning,omitempty"`
+	Error                string    `json:"error,omitempty"`
+	FetchedAt            time.Time `json:"fetchedAt"`
 }
 
 // Snapshot is what the agent /usage endpoint returns.
@@ -84,6 +87,7 @@ type Fetcher struct {
 
 	githubCacheMu   sync.Mutex
 	githubCache     map[string]billingCacheEntry
+	agyRun          func(context.Context) ([]byte, error)
 	githubRun       billingRunner
 	githubRateMu    sync.Mutex
 	githubRateUntil map[string]time.Time
@@ -183,7 +187,7 @@ func (s *Store) Snapshot() Snapshot {
 // fail return a card carrying the error; nothing panics or blocks long.
 func (f *Fetcher) FetchAll(ctx context.Context) []Card {
 	fetchers := [](func(context.Context) Card){
-		f.codex, f.opencodeGo, f.antigravity, f.opencodeZen, f.moonshot, f.claude,
+		f.codex, f.opencodeGo, f.antigravity, f.opencodeZen, f.moonshot, f.claude, f.grokActivity,
 	}
 	if org := envValue("GITHUB_BILLING_ORG"); org != "" {
 		fetchers = append(fetchers, func(ctx context.Context) Card { return f.cachedGitHubBilling(ctx, org, time.Now()) })
@@ -195,6 +199,7 @@ func (f *Fetcher) FetchAll(ctx context.Context) []Card {
 		go func(i int, get func(context.Context) Card) {
 			defer wg.Done()
 			cards[i] = get(ctx)
+			cards[i].SubscriptionPriceUSD = subscriptionPrice(cards[i].Key, time.Now())
 		}(i, get)
 	}
 	wg.Wait()
@@ -837,11 +842,36 @@ $bytes = New-Object byte[] $cred.CredentialBlobSize
 }
 
 type agBucket struct {
-	BucketID          string  `json:"bucketId"`
-	Window            string  `json:"window"`
-	Disabled          bool    `json:"disabled"`
-	RemainingFraction float64 `json:"remainingFraction"`
-	ResetTime         string  `json:"resetTime"`
+	BucketID          string   `json:"bucketId"`
+	Window            string   `json:"window"`
+	Disabled          bool     `json:"disabled"`
+	RemainingFraction *float64 `json:"remainingFraction"`
+	ResetTime         string   `json:"resetTime"`
+}
+
+// agy printmode uses snake_case; the quota endpoint uses camelCase.
+func (b *agBucket) UnmarshalJSON(data []byte) error {
+	type quotaBucket agBucket
+	var wire struct {
+		quotaBucket
+		ID        *string  `json:"id"`
+		Remaining *float64 `json:"remaining_fraction"`
+		Reset     *string  `json:"reset_time"`
+	}
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	*b = agBucket(wire.quotaBucket)
+	if wire.ID != nil {
+		b.BucketID = *wire.ID
+	}
+	if wire.Remaining != nil {
+		b.RemainingFraction = wire.Remaining
+	}
+	if wire.Reset != nil {
+		b.ResetTime = *wire.Reset
+	}
+	return nil
 }
 
 var agSpecs = []struct {
@@ -849,11 +879,12 @@ var agSpecs = []struct {
 }{
 	{"gemini-5h", "5h", "Gemini 5h"},
 	{"gemini-weekly", "weekly", "Gemini W"},
+	{"gemini-argon-wtu-weekly", "weekly", "Argon W"},
 	{"3p-5h", "5h", "3P 5h"},
 	{"3p-weekly", "weekly", "3P W"},
 }
 
-func (f *Fetcher) antigravity(ctx context.Context) Card {
+func (f *Fetcher) antigravityLegacy(ctx context.Context) Card {
 	card := Card{Key: "antigravity", Label: "Antigravity", Kind: KindQuota, FetchedAt: time.Now()}
 	candidates := f.antigravityCandidates()
 	if len(candidates) == 0 {
@@ -941,7 +972,7 @@ func parseAntigravityWindows(body []byte) ([]Gauge, error) {
 			continue
 		}
 		b := matches[0]
-		if b.Window != spec.window || b.Disabled || b.RemainingFraction < 0 || b.RemainingFraction > 1 {
+		if b.Window != spec.window || b.Disabled || b.RemainingFraction == nil || *b.RemainingFraction < 0 || *b.RemainingFraction > 1 {
 			continue
 		}
 		resetAt, err := time.Parse(time.RFC3339, b.ResetTime)
@@ -952,14 +983,14 @@ func parseAntigravityWindows(body []byte) ([]Gauge, error) {
 		if spec.window == "weekly" {
 			duration = 7 * 86400
 		}
-		value := math.Round(100*(1-b.RemainingFraction)*100) / 100
+		value := math.Round(100*(1-*b.RemainingFraction)*100) / 100
 		gauge := Gauge{
 			Label:         spec.label,
 			UsedPercent:   &value,
 			ResetAt:       resetAt.UTC(),
 			WindowSeconds: float64(duration),
 		}
-		if p, ok := projectEndPercent(spec.label, 100*(1-b.RemainingFraction),
+		if p, ok := projectEndPercent(spec.label, 100*(1-*b.RemainingFraction),
 			time.Until(resetAt).Seconds(), float64(duration), now, false); ok {
 			gauge.ProjectedEnd = &p
 		}

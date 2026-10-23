@@ -242,8 +242,8 @@ A single-accent warm palette: gold on graded near-blacks with warm-grey ink, plu
 - **Active Wash** (`active-wash`): the 7% gold row tint for an active session; a 22% version flashes and fades once when a row changes.
 
 ### State
-- **Working Green** (`state-working`): working and monitoring states in the session table.
-- **Error Coral** (`state-error`): error and unavailable states in the session table and source-collector failures.
+- **Working Green** (`state-working`): working and monitoring states in the session table, plus SUS scores at 90 or above.
+- **Error Coral** (`state-error`): error and unavailable states in the session table and source-collector failures, plus SUS scores below 75.
 - **Herdr state chips**: tinted pill pairs (working: `chip-working-text` on `chip-working-bg`; blocked: `chip-blocked-text` on `chip-blocked-bg`; done: `chip-done-text` on `chip-done-bg`; idle: `chip-idle-text` on `chip-idle-bg`; unknown: `chip-neutral-text` on `chip-neutral-bg`).
 
 ### Pulse instrument
@@ -270,7 +270,16 @@ Herdr chips (text on their own fill): working 12.50:1, blocked 9.15:1, done 9.62
 
 **The Gold Ladder Rule.** Measured use climbs a fixed ladder: Burnished Gold at rest, Signal Gold when tight (85% or more measured or forecast) or at risk, Ember only at 100%. A forecast is always translucent, never solid.
 
-**The Green Belongs to Pulse Rule.** Phosphor green is the Pulse instrument's own palette. Outside Pulse, green appears only as a state word color (working, done); it never becomes an accent.
+**The Green Belongs to Pulse Rule.** Phosphor green is the Pulse instrument's own palette. Outside Pulse, green marks working/done state words and SUS scores of 90 or above. SUS bands use Working Green at 90+, Signal Gold at 75–89, and Error Coral below 75; each always includes its numeric score. Green never becomes a decorative accent.
+
+### Subscription utilization scores
+
+A small tabular SUS label sits beneath each qualifying weekly window name.
+The usage summary includes Fleet SUS beside the run-out verdict. Scores use
+the existing state colors and 11px semibold type; n/a uses muted regular text.
+Five-hour windows have no score. Collapsed providers retain weekly score labels.
+Observed activity appears in a compact footer with source coverage and SUS n/a,
+without a quota bar or percentage.
 
 ## Typography
 
