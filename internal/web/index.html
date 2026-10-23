@@ -463,7 +463,7 @@ function remainingMs(resetAt) {
 // The forecast belongs to the moment the agent fetched it, so the run-out
 // instant is anchored there and cached readings keep counting down during an
 // outage instead of drifting with the shrinking reset horizon.
-function windowState(g, provider, fetchedAt, cardError = "", providerKey = "") {
+function windowState(g, provider, fetchedAt, cardError = "", providerKey = "", cardWarning = "") {
   const used = usedPercent(g.usedPercent);
   const projected = projectedPercent(g.projectedEnd);
   const remaining = remainingMs(g.resetAt);
@@ -471,7 +471,17 @@ function windowState(g, provider, fetchedAt, cardError = "", providerKey = "") {
   let runsOutMs = null;
   let runsOutAt = null;
   if (used != null) {
-    if (used >= 100) status = "out";
+    if (used >= 100) {
+      status = "out";
+      // Parsers cap the gauge at 100 but preserve the raw projection. Infer
+      // the earlier crossing from the complete window, not the fetch instant.
+      const seconds = Number(g.windowSeconds);
+      const reset = Date.parse(g.resetAt || "");
+      if (projected > 100 && Number.isFinite(seconds) && seconds > 0 && Number.isFinite(reset)) {
+        runsOutAt = reset - seconds*1000 + seconds*1000*100/projected;
+        runsOutMs = Math.max(0,runsOutAt-Date.now());
+      }
+    }
     else if (projected != null && projected > 100) {
       status = "risk";
       const resetAt = Date.parse(g.resetAt || "");
@@ -484,7 +494,7 @@ function windowState(g, provider, fetchedAt, cardError = "", providerKey = "") {
       }
     } else status = used >= 85 || (projected ?? 0) >= 85 ? "tight" : "ok";
   }
-  const result = { provider, raw: g.label, label: windowLabel(g.label), used, projected, remaining, status, runsOutMs, runsOutAt, fetchedAt, cardError };
+  const result = { provider, raw: g.label, label: windowLabel(g.label), used, projected, remaining, status, runsOutMs, runsOutAt, fetchedAt, cardError, cardWarning };
   result.susEligible = ["claude","codex","antigravity"].includes(providerKey || String(provider).toLowerCase())
     && windowName(g.label).period === "weekly"
     && ((providerKey || String(provider).toLowerCase()) === "antigravity" || String(g.label).toLowerCase() === "weekly");
@@ -494,7 +504,7 @@ function windowState(g, provider, fetchedAt, cardError = "", providerKey = "") {
 // Scores use the identical forecast/run-out instant as the bar. Window age is
 // measured at fetch time, so a cached early reading cannot age into a score.
 function subscriptionScore(g,w) {
-  if (!w.susEligible || w.cardError || w.used == null || w.projected == null) return null;
+  if (!w.susEligible || w.cardError || w.cardWarning || w.used == null || w.projected == null) return null;
   const seconds = Number(g.windowSeconds);
   const fetched = Date.parse(w.fetchedAt || "");
   const reset = Date.parse(g.resetAt || "");
@@ -503,7 +513,7 @@ function subscriptionScore(g,w) {
   const elapsed = seconds - (reset-fetched)/1000;
   if (elapsed < 12*3600 || elapsed > seconds) return null;
   if (w.projected <= 100) return Math.round(Math.max(0,w.projected));
-  const outAt = w.used >= 100 ? fetched : w.runsOutAt;
+  const outAt = w.runsOutAt;
   if (outAt == null) return null;
   return Math.round(Math.max(0,Math.min(100,100-100*Math.max(reset-outAt,0)/(seconds*1000))));
 }
@@ -518,7 +528,7 @@ function fleetSubscriptionScore(groups) {
     if (!values.length) return null;
     const defaults = {claude:200,codex:200,antigravity:19.99};
     const price = card.subscriptionPriceUsd === undefined ? defaults[card.key] : card.subscriptionPriceUsd;
-    return {score:Math.round(values.reduce((n,v)=>n+v,0)/values.length),price};
+    return {score:values.reduce((n,v)=>n+v,0)/values.length,price};
   }).filter(Boolean);
   if (!scored.length) return null;
   const weighted = scored.every(s=>Number.isFinite(s.price) && s.price>0);
@@ -566,7 +576,7 @@ function quotaRow(w, lead = false) {
 // Per-card freshness only when it matters: stale data or cached values kept
 // after a failed refresh. The section header carries the normal timestamp.
 function cardNote(card) {
-  if (card.error) {
+  if (card.error && card.kind !== "activity") {
     const age = rel(card.fetchedAt);
     return { text: "refresh failed · cached" + (age === "—" ? "" : age === "now" ? " just now" : " " + age), cls: "cached" };
   }
@@ -576,7 +586,8 @@ function cardNote(card) {
 }
 function noteHtml(card) {
   const note = cardNote(card);
-  return note ? `<span class="unote${note.cls ? " " + note.cls : ""}">${esc(note.text)}</span>` : "";
+  return (card.warning ? `<span class="unote">${esc(card.warning)}</span>` : "")
+    + (note ? `<span class="unote${note.cls ? " " + note.cls : ""}">${esc(note.text)}</span>` : "");
 }
 // Clauses wrap as whole units; each separator trails its clause so a wrapped
 // line never starts with "·".
@@ -1088,7 +1099,13 @@ function renderUsage(fleet) {
         || ((!!prev.error === !!c.error)
             && (Date.parse(c.fetchedAt) || 0) > (Date.parse(prev.fetchedAt) || 0));
       if (c.kind === "activity" && c.activity && prev?.activity) {
-        const events = new Map([...(prev.activity.events || []),...(c.activity.events || [])].map(e=>[e.id,e]));
+        const events = new Map();
+        for (const event of [...(prev.activity.events || []),...(c.activity.events || [])]) {
+          const at = Date.parse(event.at);
+          if (!event.id || !Number.isFinite(at) || at > Date.now()) continue;
+          const previous = events.get(event.id);
+          if (!previous || at > Date.parse(previous.at)) events.set(event.id,event);
+        }
         byKey.set(c.key,{...c,fetchedAt:(Date.parse(prev.fetchedAt)>Date.parse(c.fetchedAt)?prev.fetchedAt:c.fetchedAt),
           error:[prev.error,c.error].filter(Boolean).join("; "),
           activity:{...c.activity,sourcesAvailable:(prev.activity.sourcesAvailable || 0)+(c.activity.sourcesAvailable || 0),events:[...events.values()]}});
@@ -1106,7 +1123,7 @@ function renderUsage(fleet) {
   // out first leads the board.
   const groups = cards
     .filter((c) => c.kind === "quota" && c.gauges?.length)
-    .map((c) => ({ card: c, windows: c.gauges.map((g) => windowState(g, c.label, c.fetchedAt, c.error, c.key)).sort(compareUrgency) }))
+    .map((c) => ({ card: c, windows: c.gauges.map((g) => windowState(g, c.label, c.fetchedAt, c.error, c.key, c.warning)).sort(compareUrgency) }))
     .sort((a, b) => compareUrgency(a.windows[0], b.windows[0]));
   const billingCards = cards.filter((c) => c.kind === "billing");
   const balances = cards.filter((c) => c.kind === "balance" && Number.isFinite(c.balanceUsd));

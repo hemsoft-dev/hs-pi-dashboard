@@ -49,7 +49,9 @@ func (f *Fetcher) grokActivity(ctx context.Context) Card {
 			truncated = true
 			return
 		}
-		events[hash] = ActivityEvent{ID: hash, At: at}
+		if previous, exists := events[hash]; !exists || at.After(previous.At) {
+			events[hash] = ActivityEvent{ID: hash, At: at}
+		}
 	}
 	var failures []string
 	dbPath := envValue("HS_PI_DASHBOARD_GROK_T3_DB")

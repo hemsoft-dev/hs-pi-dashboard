@@ -2,7 +2,11 @@ package usage
 
 import (
 	"context"
+	"errors"
 	"io"
+	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -33,5 +37,26 @@ func TestUsageCommandBufferCapAppliesThroughCopy(t *testing.T) {
 	var b usageCommandBuffer
 	if _, err := io.Copy(&b, struct{ io.Reader }{strings.NewReader(strings.Repeat("x", 5<<20))}); err == nil || b.buffer.Len() > 4<<20 {
 		t.Fatal("unbounded output", err)
+	}
+}
+
+func TestAntigravityLiveFallbackHasWarningWithoutRefreshError(t *testing.T) {
+	home := t.TempDir()
+	auth := filepath.Join(home, ".pi", "agent")
+	if err := os.MkdirAll(auth, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(auth, "auth.json"), []byte(`{"antigravity":{"type":"oauth","access":"fixture"}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	future := time.Now().Add(72 * time.Hour).UTC().Format(time.RFC3339)
+	payload := `{"groups":[{"buckets":[{"bucketId":"gemini-weekly","window":"weekly","remainingFraction":0.8,"resetTime":"` + future + `"}]}]}`
+	f := &Fetcher{Home: home, agyRun: func(context.Context) ([]byte, error) { return nil, errors.New("CLI unavailable") },
+		Client: &http.Client{Transport: usageRoundTripper(func(*http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(payload)), Header: make(http.Header)}, nil
+		})}}
+	card := f.antigravity(context.Background())
+	if len(card.Gauges) != 1 || card.Error != "" || !strings.Contains(card.Warning, "live legacy pools") {
+		t.Fatal(card)
 	}
 }

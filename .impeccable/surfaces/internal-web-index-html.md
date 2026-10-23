@@ -9,7 +9,7 @@ Scope: the Usage & Balances section of the fleet dashboard (internal/web/index.h
 
 Audience and job: Franz, on desktop, T3's narrow panel and phone, checking whether any quota window will run out before it resets. Balances and collector health are secondary.
 
-Constraints: /api/fleet retains existing usage fields and adds subscriptionPriceUsd plus observed activity metadata; keyboard toggles keep focus across the 5 s refresh; saved section and per-provider collapse; synthetic data only in evidence (public repo).
+Constraints: /api/fleet retains existing usage fields and adds subscriptionPriceUsd, live-source warning text and observed activity metadata; keyboard toggles keep focus across the 5 s refresh; saved section and per-provider collapse; synthetic data only in evidence (public repo).
 
 ## Direction contract
 

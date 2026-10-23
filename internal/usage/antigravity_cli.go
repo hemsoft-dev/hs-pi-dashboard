@@ -27,7 +27,7 @@ func (f *Fetcher) antigravity(ctx context.Context) Card {
 	}
 	legacy := f.antigravityLegacy(ctx)
 	if len(legacy.Gauges) > 0 {
-		legacy.Error = "Antigravity CLI weekly buckets unavailable; showing legacy pools"
+		legacy.Warning = "Antigravity CLI weekly buckets unavailable; showing live legacy pools (SUS n/a)"
 	}
 	return legacy
 }

@@ -58,6 +58,7 @@ type Card struct {
 	Kind                 string    `json:"kind"`
 	BalanceUSD           *float64  `json:"balanceUsd,omitempty"`
 	Gauges               []Gauge   `json:"gauges,omitempty"`
+	Warning              string    `json:"warning,omitempty"`
 	Error                string    `json:"error,omitempty"`
 	FetchedAt            time.Time `json:"fetchedAt"`
 }

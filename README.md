@@ -325,7 +325,8 @@ readings show n/a. Cached early readings cannot age into a score without a
 new sample. Expired windows also show n/a. Provider filters apply to Fleet SUS.
 
 Each provider's scored weekly buckets are averaged first, then that provider
-is weighted once. Current monthly weights are Claude $200, Codex $200 and
+is weighted once, preserving fractional provider means until the final Fleet
+SUS is rounded. Current monthly weights are Claude $200, Codex $200 and
 Antigravity $19.99. If any scored provider has an unknown price, Fleet SUS uses
 equal provider weights. Providers with no score are excluded.
 
@@ -346,7 +347,9 @@ Gemini and Argon independent. The collector requires an existing CLI session
 and never starts sign-in when its session file is absent. Set
 `HS_PI_DASHBOARD_AGY_BIN` if the service cannot find the CLI. A 15-second
 deadline and 4 MiB output bound apply. When CLI usage is unavailable, legacy
-quota pools remain visible with an explicit warning and no SUS.
+quota pools remain visible with an explicit warning and no SUS. These are live
+readings, labeled separately from cached refresh failures. Grok coverage
+warnings also describe the current scan rather than cached quota data.
 
 Grok / X has no available quota data, so it shows observed turns over the last
 seven days and SUS n/a. Each agent reads only local turn IDs/timestamps from

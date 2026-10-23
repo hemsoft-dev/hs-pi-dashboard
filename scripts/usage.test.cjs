@@ -476,3 +476,47 @@ test('cached SUS preserves lockout already elapsed after projected run-out',()=>
  vm.runInContext('Date.now=()=>fixedNow',r);
  assert.equal(r.windowState(g,'Codex',at,'','codex').sus,40);
 });
+
+test('exhausted readings infer the earlier crossing from the uncapped projection',()=>{
+ const {r}=renderer();
+ const now=Date.now();
+ const at=new Date(now).toISOString();
+ // Raw 120% at day 5 projects to 168%; the crossing was at day 4 1/6.
+ const g={label:'Weekly',usedPercent:100,projectedEnd:168,windowSeconds:168*3600,resetAt:new Date(now+48*H).toISOString()};
+ const w=r.windowState(g,'Codex',at,'','codex');
+ assert.equal(w.sus,60);
+ assert.ok(Math.abs(w.runsOutAt-(now-20*H))<5);
+ assert.equal(w.runsOutMs,0);
+});
+test('fleet weighting retains fractional provider means until the final score',()=>{
+ const {r}=renderer();
+ const groups=[{card:{key:'antigravity',subscriptionPriceUsd:null},windows:[{sus:74},{sus:75}]},
+  {card:{key:'codex',subscriptionPriceUsd:200},windows:[{sus:74}]}];
+ assert.equal(r.fleetSubscriptionScore(groups),74);
+ assert.match(r.susMarkup(r.fleetSubscriptionScore(groups),'Fleet SUS'),/usus red/);
+});
+test('live legacy quota warnings do not claim cached or failed refresh',()=>{
+ const {r,body}=renderer();
+ r.renderUsage({machines:[{usage:{cards:[card({key:'antigravity',label:'Antigravity',warning:'CLI weekly unavailable; live legacy pools',gauges:[scoredGauge(90,96,40,'Gemini W')]})]}}]});
+ assert.match(body.innerHTML,/live legacy pools/);
+ assert.match(body.innerHTML,/SUS n\/a/);
+ assert.doesNotMatch(body.innerHTML,/cached|Refresh failing|refresh failed/);
+});
+test('current partial or unavailable Grok activity never claims cached values',()=>{
+ const {r,body}=renderer();
+ for(const sourcesAvailable of [0,1]) {
+  r.renderUsage({machines:[{usage:{cards:[{key:'grok',label:'Grok / X',kind:'activity',fetchedAt:new Date().toISOString(),error:'T3 activity unavailable',activity:{sourcesAvailable,scope:'Observed',events:[]}}]}}]});
+  assert.match(body.innerHTML,/T3 activity unavailable/);
+  assert.doesNotMatch(body.innerHTML,/cached|refresh failed/);
+ }
+});
+test('fleet activity keeps the latest valid duplicate timestamp in either target order',()=>{
+ const {r,body}=renderer();
+ const recent=new Date(Date.now()-H).toISOString();
+ const old=new Date(Date.now()-169*H).toISOString();
+ const mk=at=>({usage:{cards:[{key:'grok',label:'Grok / X',kind:'activity',fetchedAt:recent,activity:{sourcesAvailable:1,scope:'Observed',events:[{id:'same',at}]}}]}});
+ for(const times of [[recent,old],[old,recent],[recent,'invalid'],['invalid',recent]]) {
+  r.renderUsage({machines:times.map(mk)});
+  assert.match(body.innerHTML,/1 turn\/7d/);
+ }
+});
