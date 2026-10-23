@@ -9,7 +9,7 @@ Scope: the Usage & Balances section of the fleet dashboard (internal/web/index.h
 
 Audience and job: Franz, on desktop, T3's narrow panel and phone, checking whether any quota window will run out before it resets. Balances and collector health are secondary.
 
-Constraints: /api/fleet contract unchanged; keyboard toggles keep focus across the 5 s refresh; saved section and per-provider collapse; synthetic data only in evidence (public repo).
+Constraints: /api/fleet retains existing usage fields and adds subscriptionPriceUsd plus observed activity metadata; keyboard toggles keep focus across the 5 s refresh; saved section and per-provider collapse; synthetic data only in evidence (public repo).
 
 ## Direction contract
 
@@ -19,7 +19,7 @@ OWN-WORLD: The session table's language: bordered #0d0d0d panel, #080808 gold gr
 
 STORY: Franz sees which window runs out first and when, then confirms the rest are on pace, then notices balances and any provider that is not reporting.
 
-FIRST VIEWPORT: Section header carries the verdict ("Codex weekly runs out in 1d 6h") and one freshness stamp. Below it, provider groups ordered by urgency, rows ordered by urgency, the limit line aligned across rows. Balances and a one-line "not reporting" disclosure close the panel.
+FIRST VIEWPORT: Section header carries the verdict ("Codex weekly runs out in 1d 6h") and one freshness stamp, plus Fleet SUS from eligible displayed providers. Below it, provider groups ordered by urgency, rows ordered by urgency, the limit line aligned across rows. Weekly rows include numeric SUS labels with semantic band colors; early windows show n/a and five-hour rows have no score. Observed Grok activity has SUS n/a and no quota bar. Balances and a one-line "not reporting" disclosure close the panel.
 
 FORM: Instrument table (position 1 of 3 structures considered: runway table, ranked list, per-provider cards); no seed key, extension path.
 

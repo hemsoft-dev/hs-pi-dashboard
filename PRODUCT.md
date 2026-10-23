@@ -24,7 +24,8 @@ hs-pi-dashboard is one Go binary that collects Pi, Claude Code, T3 Code, Herdr a
 
 - Plain HTML, CSS and JavaScript embedded in the Go binary with `embed`; no build step, framework or web font downloads.
 - Read-only: the dashboard never sends input to agents or providers.
-- Usage data comes from the `/api/fleet` contract: quota cards with windows (`usedPercent`, `resetAt`, `windowSeconds`, `projectedEnd`), balance cards (`balanceUsd`), per-card `error` and `fetchedAt`.
+- Weekly subscription usage includes per-window SUS and a provider-price-weighted Fleet SUS. Scores share the displayed forecast; fresh or unavailable windows show n/a. Grok reports observed seven-day activity without a quota estimate.
+- Usage data comes from the `/api/fleet` contract: quota cards with windows (`usedPercent`, `resetAt`, `windowSeconds`, `projectedEnd`), balance cards (`balanceUsd`), observed activity cards (`activity` with hashed turn IDs/timestamps and source coverage), optional subscription prices (`subscriptionPriceUsd`), per-card `error` and `fetchedAt`.
 - Provider collectors can fail independently; the UI must keep failures, stale data and missing values explicit rather than showing a healthy zero.
 
 ## Brand Commitments
