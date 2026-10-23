@@ -426,3 +426,53 @@ func TestCapturedProducerRateLimitStopsSweep(t *testing.T) {
 		}
 	}
 }
+
+func TestRepeatedRateHeadersUseLatestDeadline(t *testing.T) {
+	now := time.Date(2026, 10, 23, 4, 0, 0, 0, time.UTC)
+	for _, message := range []string{
+		"GitHub rate limit; X-RateLimit-Reset: 1792731600; X-RateLimit-Reset: 1792735200",
+		"GitHub rate limit; Retry-After: 3600; Retry-After: 7200",
+		"GitHub rate limit; X-RateLimit-Reset: 1792735200; Retry-After: 3600",
+	} {
+		var limited *rateLimitError
+		if !errors.As(classifyStatusFailure([]byte(message), errors.New("failure"), now), &limited) || !limited.until.Equal(now.Add(2*time.Hour)) {
+			t.Fatal(message, limited)
+		}
+	}
+}
+
+func TestSkippedResultsPreserveActualAttemptTimes(t *testing.T) {
+	now := time.Now()
+	s := New([]string{"a", "b", "c"}, 0)
+	s.now = func() time.Time { return now }
+	s.run = func(context.Context, string) ([]byte, error) { return fixture(t), nil }
+	s.refresh(context.Background())
+	previous := s.Snapshot()
+	now = now.Add(time.Hour)
+	s.run = func(context.Context, string) ([]byte, error) { return nil, &rateLimitError{} }
+	s.refresh(context.Background())
+	got := s.Snapshot()
+	if !got.Results[0].AttemptedAt.Equal(now) {
+		t.Fatal("attempted path missing actual time")
+	}
+	for i := 1; i < 3; i++ {
+		if !got.Results[i].AttemptedAt.Equal(previous.Results[i].AttemptedAt) {
+			t.Fatal("skip fabricated attempt", got.Results[i])
+		}
+	}
+	fresh := New([]string{"a", "b"}, 0)
+	fresh.run = s.run
+	fresh.refresh(context.Background())
+	if !fresh.Snapshot().Results[1].AttemptedAt.IsZero() {
+		t.Fatal("never-attempted checkout has attempt")
+	}
+}
+
+func TestOrdinaryRateLimitWordsDoNotTriggerBackoff(t *testing.T) {
+	original := errors.New("failure")
+	for _, message := range []string{"stat /tmp/rate limit/tests: missing directory", "config rate limits are invalid", "open /tmp/rate_limit_exceeded.txt: denied"} {
+		if got := classifyStatusFailure([]byte(message), original, time.Now()); got != original {
+			t.Fatal(message, got)
+		}
+	}
+}

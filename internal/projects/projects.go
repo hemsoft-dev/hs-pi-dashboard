@@ -162,9 +162,9 @@ func (s *Store) refresh(ctx context.Context) {
 		return
 	}
 	old := s.Snapshot()
-	previous := map[string]*Document{}
+	previous := map[string]Result{}
 	for _, r := range old.Results {
-		previous[r.Path] = r.Document
+		previous[r.Path] = r
 	}
 	results := make([]Result, len(s.paths))
 	var limited *rateLimitError
@@ -175,13 +175,15 @@ func (s *Store) refresh(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
-		r := Result{Path: p, AttemptedAt: s.now()}
+		r := Result{Path: p}
 		if limited != nil {
 			r.Error = "skipped: GitHub rate limited"
-			r.Document = previous[p]
+			r.AttemptedAt = previous[p].AttemptedAt
+			r.Document = previous[p].Document
 			results[i] = r
 			continue
 		}
+		r.AttemptedAt = s.now()
 		c, cancel := context.WithTimeout(ctx, 45*time.Second)
 		data, err := s.run(c, p)
 		cancel()
@@ -205,7 +207,7 @@ func (s *Store) refresh(ctx context.Context) {
 			}
 		}
 		if r.Error != "" {
-			r.Document = previous[p]
+			r.Document = previous[p].Document
 		}
 		results[i] = r
 	}
@@ -271,6 +273,7 @@ func (e *rateLimitError) Error() string {
 }
 
 var resetHeader = regexp.MustCompile(`(?im)x-ratelimit-reset\s*[:=]\s*(\d+)`)
+var rateLimitDiagnostic = regexp.MustCompile(`(?i)(?:^|[\s:("'\[])(?:api rate limit(?: already)? exceeded|secondary rate limit|github rate limit|rate limit exceeded|rate_limit exceeded|rate_limit_exceeded|abuse detection(?: mechanism)?|http 429)(?:$|[\s:;,.)"'])`)
 var retryHeader = regexp.MustCompile(`(?im)retry-after\s*[:=]\s*(\d+)`)
 
 func maxTime(a, b time.Time) time.Time {
@@ -280,18 +283,16 @@ func maxTime(a, b time.Time) time.Time {
 	return a
 }
 func classifyStatusFailure(stderr []byte, original error, now time.Time) error {
-	message := strings.ToLower(string(stderr))
-	if !strings.Contains(message, "rate limit") && !strings.Contains(message, "rate_limit exceeded") && !strings.Contains(message, "rate_limit_exceeded") &&
-		!strings.Contains(message, "abuse detection") && !strings.Contains(message, "http 429") {
+	if !rateLimitDiagnostic.Match(stderr) {
 		return original
 	}
 	var until time.Time
-	if match := resetHeader.FindSubmatch(stderr); len(match) > 1 {
+	for _, match := range resetHeader.FindAllSubmatch(stderr, -1) {
 		if seconds, err := strconv.ParseInt(string(match[1]), 10, 64); err == nil {
-			until = time.Unix(seconds, 0)
+			until = maxTime(until, time.Unix(seconds, 0))
 		}
 	}
-	if match := retryHeader.FindSubmatch(stderr); len(match) > 1 {
+	for _, match := range retryHeader.FindAllSubmatch(stderr, -1) {
 		if seconds, err := strconv.ParseInt(string(match[1]), 10, 64); err == nil && seconds > 0 && seconds <= int64((time.Duration(1<<63-1))/time.Second) {
 			until = maxTime(until, now.Add(time.Duration(seconds)*time.Second))
 		}
