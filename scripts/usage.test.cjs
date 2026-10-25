@@ -29,7 +29,13 @@ function gauge(usedPercent, projectedEnd = null, extra = {}) {
   return { label: 'Weekly', usedPercent, projectedEnd, resetAt: new Date(Date.now() + 10 * H).toISOString(), ...extra };
 }
 function card(overrides = {}) {
-  return { key: 'codex', label: 'Codex', kind: 'quota', fetchedAt: new Date().toISOString(), gauges: [gauge(50, 125)], ...overrides };
+  const result = { key: 'codex', label: 'Codex', kind: 'quota', fetchedAt: new Date().toISOString(), gauges: [gauge(50, 125)], ...overrides };
+  // Existing generic card tests now model the canonical collector contract.
+  if (result.key === 'antigravity') result.gauges = result.gauges?.map(g => {
+    const id = g.bucketId ?? ({Weekly:'gemini-weekly','Gemini W':'gemini-weekly','Gemini 5h':'gemini-5h'}[g.label]);
+    return {...g,bucketId:id,windowSeconds:g.windowSeconds ?? (id === 'gemini-5h' ? 18000 : 604800)};
+  });
+  return result;
 }
 const widthOf = (html, cls) => Number((html.match(new RegExp(`class="${cls}[^"]*" style="left:[\\d.]+%;width:([\\d.]+)%`)) || [])[1] ?? NaN);
 
@@ -108,14 +114,14 @@ test('urgency puts the window that runs out first ahead of everything else', () 
 test('the board leads with the most urgent provider and states it in the section header', () => {
   const { r, body, summary } = renderer();
   const fleet = { machines: [{ usage: { cards: [
-    card({ key: 'antigravity', label: 'Antigravity', gauges: [gauge(0, null, { label: 'Gemini 5h' }), gauge(18, 112, { label: '3P W' })] }),
+    card({ key: 'antigravity', label: 'Antigravity', gauges: [gauge(0, null, { label: 'Gemini 5h' }), gauge(18, 112, { label: 'Gemini W' })] }),
     card({ gauges: [gauge(82, 131)] }),
     card({ key: 'moonshot', label: 'Moonshot AI', kind: 'balance', gauges: undefined, balanceUsd: 42.5 }),
   ] } }] };
   r.renderUsage(fleet);
   assert.ok(body.innerHTML.indexOf('>Codex<') < body.innerHTML.indexOf('>Antigravity<'));
   const ag = body.innerHTML.slice(body.innerHTML.indexOf('>Antigravity<'));
-  assert.ok(ag.indexOf('Third-party · weekly') < ag.indexOf('Gemini · 5-hour'));
+  assert.ok(ag.indexOf('Gemini · weekly') < ag.indexOf('Gemini · 5-hour'));
   assert.match(summary.innerHTML, /<span class="uverdict s-risk">Codex weekly runs out in [^<]+ <span class="umore"><span class="usep">· <\/span>1 more at risk<\/span><\/span>(?:<span class="usus[^"]*"[^>]*>[^<]*<\/span>)?<span class="usr">, <\/span><span class="ufresh">updated now<\/span>/);
   assert.match(body.innerHTML, /class="ucols"/);
   assert.match(body.innerHTML, /<li class="urow s-risk ulead"><span class="uwin">Weekly/);
@@ -263,7 +269,7 @@ test('a refresh failure is stamped with the failed reading, not the oldest healt
   const minuteOld = new Date(Date.now() - 60000).toISOString();
   r.renderUsage({ machines: [{ usage: { cards: [
     card({ gauges: [gauge(20, 40)], fetchedAt: hourOld }),
-    card({ key: 'antigravity', label: 'Antigravity', gauges: [gauge(10, 30)], fetchedAt: minuteOld, error: 'timeout' }),
+    card({ key: 'antigravity', label: 'Antigravity', gauges: [gauge(10, 30),gauge(5,10,{label:'Gemini 5h'})], fetchedAt: minuteOld, error: 'timeout' }),
   ] } }] });
   assert.match(summary.innerHTML, /<span class="ufresh cached">refresh failed · cached 60s ago<\/span>/);
 });
@@ -431,7 +437,7 @@ test('Fleet SUS weights each subscription once and excludes unavailable scores',
  const groups=[
   {card:{key:'claude',subscriptionPriceUsd:200},windows:[{sus:100}]},
   {card:{key:'codex',subscriptionPriceUsd:200},windows:[{sus:50}]},
-  {card:{key:'antigravity',subscriptionPriceUsd:19.99},windows:[{sus:80},{sus:100}]},
+  {card:{key:'antigravity',subscriptionPriceUsd:19.99},windows:[{sus:90,bucketId:'gemini-weekly'},{sus:100,bucketId:'3p-weekly'}]},
  ];
  assert.equal(r.fleetSubscriptionScore(groups),76);
  groups[0].card.subscriptionPriceUsd=null;
@@ -490,7 +496,7 @@ test('exhausted readings infer the earlier crossing from the uncapped projection
 });
 test('fleet weighting retains fractional provider means until the final score',()=>{
  const {r}=renderer();
- const groups=[{card:{key:'antigravity',subscriptionPriceUsd:null},windows:[{sus:74},{sus:75}]},
+ const groups=[{card:{key:'antigravity',subscriptionPriceUsd:null},windows:[{sus:74.5,bucketId:'gemini-weekly'},{sus:100,bucketId:'3p-weekly'}]},
   {card:{key:'codex',subscriptionPriceUsd:200},windows:[{sus:74}]}];
  assert.equal(r.fleetSubscriptionScore(groups),74);
  assert.match(r.susMarkup(r.fleetSubscriptionScore(groups),'Fleet SUS'),/usus red/);
@@ -534,4 +540,91 @@ test('activity unions retain oldest contributor freshness and offline coverage',
    assert.doesNotMatch(body.innerHTML,/cached/);
   }
  }
+});
+
+// Synthetic mixed/cached fleet contract. Provenance: internal/usage/testdata/antigravity/README.md.
+test('Antigravity mixed pools cannot drive the board, warning or Fleet SUS',()=>{
+ const {r,body,summary}=renderer();
+ const at=new Date().toISOString();
+ const gemini={...scoredGauge(47,72,20,'Untrusted display text'),bucketId:'gemini-weekly'};
+ const third={...scoredGauge(214,120,92,'3P W'),bucketId:'3p-weekly'};
+ const argon={...scoredGauge(163,96,70,'Argon W'),bucketId:'gemini-argon-wtu-weekly'};
+ const short={...gauge(10,17,{label:'Gemini 5h',windowSeconds:18000,resetAt:new Date(Date.now()+2*H).toISOString()}),bucketId:'gemini-5h'};
+ r.renderUsage({machines:[{usage:{cards:[card({key:'antigravity',label:'Antigravity',fetchedAt:at,gauges:[third,argon,gemini,short]})]}}]});
+ assert.match(body.innerHTML,/Gemini · weekly/);
+ assert.match(body.innerHTML,/20%/);assert.match(body.innerHTML,/47%/);
+ assert.match(body.innerHTML,/SUS 47/);assert.match(summary.innerHTML,/Fleet SUS 47/);
+ assert.match(summary.innerHTML,/all plans on pace/);
+ assert.doesNotMatch(body.innerHTML,/Third-party|Argon|92%|70%|214%|163%|Untrusted display text/);
+});
+
+test('missing or malformed Gemini stays unavailable despite healthy unrelated pools',()=>{
+ const valid={...scoredGauge(47,72,20,'Gemini W'),bucketId:'gemini-weekly'};
+ const unrelated={...scoredGauge(99,96,90,'Gemini W'),bucketId:'3p-weekly'};
+ const cases=[[],[unrelated],[{...valid,bucketId:undefined}], // old agent, label alone
+  [{...valid,disabled:true}],[valid,{...valid}],
+  [{...valid,usedPercent:null}],[{...valid,usedPercent:'20'}],
+  [{...valid,usedPercent:-1}],[{...valid,usedPercent:101}],
+  [{...valid,resetAt:'invalid'}],[{...valid,resetAt:new Date(Date.now()-H).toISOString()}],
+  [{...valid,windowSeconds:18000}]];
+ for(const gauges of cases){
+  const {r,body,summary}=renderer();
+  const ag={key:'antigravity',label:'Antigravity',kind:'quota',fetchedAt:new Date().toISOString(),gauges:[...gauges,unrelated]};
+  const fleet={machines:[{usage:{cards:[ag]}}]};
+  r.renderUsage(fleet);
+  assert.match(body.innerHTML,/Gemini · weekly/);assert.match(body.innerHTML,/unavailable/);
+  assert.match(body.innerHTML,/SUS n\/a/);assert.match(summary.innerHTML,/Fleet SUS n\/a/);
+  assert.doesNotMatch(body.innerHTML,/90%|99%|20%|0%<span class="ulbl"> used|refresh failed · cached/);
+  assert.doesNotMatch(summary.innerHTML,/all plans on pace|near limit|runs out|limit reached/);
+  r.lastFleet=fleet;r.toggleCard('global','antigravity');r.renderUsage(fleet);
+  assert.match(body.innerHTML,/ugroup-sum[^]*no reading/);
+  assert.doesNotMatch(body.innerHTML,/90%|99%|20%/);
+ }
+});
+
+test('partial Gemini windows keep valid metrics and only the eligible weekly SUS',()=>{
+ const at=new Date().toISOString();
+ const weekly={...scoredGauge(47,72,20,'Unrelated label'),bucketId:'gemini-weekly'};
+ const short={...gauge(10,17,{label:'Unrelated label',windowSeconds:18000,resetAt:new Date(Date.now()+2*H).toISOString()}),bucketId:'gemini-5h'};
+ for(const gauges of [[weekly],[weekly,{...short,usedPercent:'invalid'}],[short],[short,{...weekly,disabled:true}]]){
+  const {r,body,summary}=renderer();
+  r.renderUsage({machines:[{usage:{cards:[{key:'antigravity',label:'Antigravity',kind:'quota',fetchedAt:at,gauges}]}}]});
+  assert.match(body.innerHTML,/unavailable/);
+  if(gauges[0]===weekly){
+   assert.match(body.innerHTML,/20%/);assert.match(body.innerHTML,/47%/);
+   assert.match(summary.innerHTML,/Fleet SUS 47/);
+  }else{
+   assert.match(body.innerHTML,/10%/);assert.match(summary.innerHTML,/Fleet SUS n\/a/);
+  }
+  assert.doesNotMatch(body.innerHTML,/Unrelated label/);
+ }
+});
+
+test('fleet selection cannot prefer a fresh old-agent or 3P-only card over Gemini evidence',()=>{
+ const {r,body,summary}=renderer();
+ const at=Date.now();
+ const good={key:'antigravity',label:'Antigravity',kind:'quota',fetchedAt:new Date(at-60000).toISOString(),gauges:[{...scoredGauge(47,72,20,'Gemini W'),bucketId:'gemini-weekly'}]};
+ for(const gauges of [[scoredGauge(200,96,90,'Gemini W')],[{...scoredGauge(200,96,90,'3P W'),bucketId:'3p-weekly'}]]){
+  const bad={...good,fetchedAt:new Date(at).toISOString(),gauges};
+  for(const cards of [[good,bad],[bad,good]]){
+   r.renderUsage({machines:cards.map(c=>({usage:{cards:[c]}}))});
+   assert.match(body.innerHTML,/20%/);assert.match(summary.innerHTML,/Fleet SUS 47/);
+   assert.doesNotMatch(body.innerHTML,/90%|200%|Third-party/);
+  }
+ }
+ // A cached genuine Gemini reading may remain visible after refresh failure,
+ // but no SUS can be asserted for that failed reading.
+ r.renderUsage({machines:[{usage:{cards:[{...good,error:'timeout',gauges:[...good.gauges,{...scoredGauge(200,96,90,'3P W'),bucketId:'3p-weekly'}]}]}}]});
+ assert.match(body.innerHTML,/20%/);assert.match(body.innerHTML,/refresh failed · cached/);
+ assert.match(summary.innerHTML,/Fleet SUS n\/a/);assert.doesNotMatch(body.innerHTML,/90%|200%|Third-party/);
+});
+
+test('Antigravity blended balances and unrelated weekly scores cannot enter Fleet SUS',()=>{
+ const {r,body,summary}=renderer();
+ r.renderUsage({machines:[{usage:{cards:[{key:'antigravity',label:'Antigravity',kind:'balance',balanceUsd:900,fetchedAt:new Date().toISOString()}]}}]});
+ assert.match(body.innerHTML,/unavailable/);assert.doesNotMatch(body.innerHTML,/\$900/);
+ assert.match(summary.innerHTML,/Fleet SUS n\/a/);
+ const third=r.windowState({...scoredGauge(90,96,80,'Gemini W'),bucketId:'3p-weekly'},'Antigravity',new Date().toISOString(),'','antigravity');
+ assert.equal(third.sus,null);assert.equal(third.susEligible,false);
+ assert.equal(r.fleetSubscriptionScore([{card:{key:'antigravity'},windows:[{sus:100,bucketId:'3p-weekly'},{sus:80,bucketId:'gemini-argon-wtu-weekly'}]}]),null);
 });

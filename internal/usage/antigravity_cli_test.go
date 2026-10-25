@@ -12,12 +12,12 @@ import (
 	"time"
 )
 
-func TestAntigravityCommandRequiresReadOnlyUsageAndKeepsArgonSeparate(t *testing.T) {
+func TestAntigravityCommandRequiresReadOnlyUsageAndExcludesArgon(t *testing.T) {
 	future := time.Now().Add(72 * time.Hour).UTC().Format(time.RFC3339)
 	payload := `{"num_turns":0,"command":{"name":"usage","data":{"groups":[{"buckets":[{"bucketId":"gemini-weekly","window":"weekly","remainingFraction":0.8,"resetTime":"` + future + `"},{"bucketId":"gemini-argon-wtu-weekly","window":"weekly","remainingFraction":0.3,"resetTime":"` + future + `"}]}]}}}`
 	f := &Fetcher{Home: t.TempDir(), agyRun: func(context.Context) ([]byte, error) { return []byte(payload), nil }}
 	card := f.antigravity(context.Background())
-	if card.Error != "" || len(card.Gauges) != 2 || card.Gauges[1].Label != "Argon W" {
+	if card.Error != "" || len(card.Gauges) != 1 || card.Gauges[0].Label != "Gemini W" {
 		t.Fatal(card)
 	}
 	for _, invalid := range []string{strings.Replace(payload, `"num_turns":0`, `"num_turns":1`, 1), strings.Replace(payload, `"name":"usage"`, `"name":"chat"`, 1), `{"command":{"name":"usage"}}`} {
@@ -56,7 +56,7 @@ func TestAntigravityLiveFallbackHasWarningWithoutRefreshError(t *testing.T) {
 			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(payload)), Header: make(http.Header)}, nil
 		})}}
 	card := f.antigravity(context.Background())
-	if len(card.Gauges) != 1 || card.Error != "" || !strings.Contains(card.Warning, "live legacy pools") {
+	if len(card.Gauges) != 1 || card.Error != "" || !strings.Contains(card.Warning, "Gemini Models from quota endpoint") {
 		t.Fatal(card)
 	}
 }
@@ -108,15 +108,41 @@ func TestAntigravityCLIPrintBucketsMatchChiefContract(t *testing.T) {
 	// quota API uses camelCase; Chief's pinned ag_gauges accepts both.
 	payload := `{"num_turns":0,"command":{"name":"usage","data":{"groups":[{"buckets":[{"id":"gemini-weekly","window":"weekly","remaining_fraction":0.8,"reset_time":"` + reset + `"},{"id":"gemini-argon-wtu-weekly","window":"weekly","remaining_fraction":0.3,"reset_time":"` + reset + `"}]}]}}}`
 	gauges, err := parseAntigravityCommand([]byte(payload))
-	if err != nil || len(gauges) != 2 || gauges[0].Label != "Gemini W" || *gauges[0].UsedPercent != 20 || gauges[1].Label != "Argon W" || *gauges[1].UsedPercent != 70 {
+	if err != nil || len(gauges) != 1 || gauges[0].Label != "Gemini W" || *gauges[0].UsedPercent != 20 {
 		t.Fatal(gauges, err)
 	}
 	for _, fraction := range []string{`null`, `-0.1`, `1.1`} {
 		bad := strings.Replace(payload, `"remaining_fraction":0.8`, `"remaining_fraction":`+fraction, 1)
-		// The independent Argon reading remains; missing Gemini data is not 100%.
+		// Healthy Argon cannot substitute for missing Gemini.
 		got, err := parseAntigravityCommand([]byte(bad))
-		if err != nil || len(got) != 1 || got[0].Label != "Argon W" {
+		if err == nil || len(got) != 0 {
 			t.Fatal(got, err)
 		}
+	}
+}
+
+func TestAntigravityFallbackCannotSubstituteUnrelatedQuota(t *testing.T) {
+	// Synthetic command and endpoint responses. The only credentials are this
+	// test-owned fake pi-auth fixture, and the transport cannot reach a provider.
+	home := t.TempDir()
+	auth := filepath.Join(home, ".pi", "agent")
+	if err := os.MkdirAll(auth, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(auth, "auth.json"), []byte(`{"antigravity":{"type":"oauth","access":"fixture"}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	reset := time.Now().Add(72 * time.Hour).UTC().Format(time.RFC3339)
+	unrelated := `{"groups":[{"name":"Gemini Models","buckets":[{"id":"3p-weekly","window":"weekly","remaining_fraction":0.9,"reset_time":"` + reset + `"},{"id":"gemini-argon-wtu-weekly","window":"weekly","remaining_fraction":0.8,"reset_time":"` + reset + `"}]}]}`
+	called := false
+	f := &Fetcher{Home: home, agyRun: func(context.Context) ([]byte, error) {
+		return []byte(`{"num_turns":0,"command":{"name":"usage","data":` + unrelated + `}}`), nil
+	}, Client: &http.Client{Transport: usageRoundTripper(func(*http.Request) (*http.Response, error) {
+		called = true
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(unrelated)), Header: make(http.Header)}, nil
+	})}}
+	got := f.antigravity(context.Background())
+	if !called || len(got.Gauges) != 0 || !strings.Contains(got.Error, "Gemini Models quota unavailable") || got.Warning != "" {
+		t.Fatal(got, called)
 	}
 }

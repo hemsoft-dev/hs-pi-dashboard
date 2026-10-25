@@ -50,7 +50,7 @@ last known sessions grayed out.
 
 Above the session grid sits an expandable/collapsible **Usage & Balances**
 section built as a runway board. Every quota window (Codex weekly, OpenCode Go
-5-hour / weekly / monthly, Antigravity Gemini and third-party 5-hour + weekly)
+5-hour / weekly / monthly, Antigravity Gemini Models 5-hour + weekly)
 is one row on a shared 0-125% scale with the plan limit marked at 100%. The
 solid bar is measured usage; the outlined extension is the forecast at reset,
 turning ember where it passes the limit, so over-limit forecasts line up down
@@ -318,8 +318,9 @@ the bars, preserving the full projected lockout interval when cached data
 ages beyond that instant. Scores are rounded to the nearest whole number, with green at 90+,
 yellow at 75–89, and red below 75.
 
-Claude Weekly, Codex Weekly, and Antigravity's independent Gemini, Argon and
-third-party weekly pools qualify. Five-hour windows do not get SUS. Windows
+Claude Weekly, Codex Weekly, and Antigravity's Gemini Models weekly window
+qualify. Argon and third-party pools are excluded from Antigravity metrics and
+Fleet SUS. Five-hour windows do not get SUS. Windows
 younger than 12 hours at the reading's fetch time, missing forecasts and failed
 readings show n/a. Cached early readings cannot age into a score without a
 new sample. Expired windows also show n/a. Provider filters apply to Fleet SUS.
@@ -342,16 +343,25 @@ date is guessed. Invalid price/date configuration makes the price unknown.
 
 Antigravity weekly groups come from the structured
 [`agy -p /usage --output-format json` command](https://www.antigravity.google/docs/cli/commands/usage/),
-requiring `num_turns: 0` and `command.name: usage`. Stable bucket IDs keep
-Gemini and Argon independent. The parser accepts the CLI print format
+requiring `num_turns: 0` and `command.name: usage`. Only the canonical
+`gemini-5h` and `gemini-weekly` bucket IDs supply Antigravity metrics. Group
+names and display labels never select a pool. The parser accepts the CLI print format
 `id`/`remaining_fraction`/`reset_time` and the quota API camelCase fields.
-Missing remaining fractions are unavailable rather than full usage. The collector requires an existing CLI session
+Missing, disabled, duplicate, expired or malformed Gemini windows are unavailable
+rather than zero or unrelated fallback. A valid window remains usable when the
+other is missing. Gauges carry `bucketId` through `/api/fleet`; the renderer
+revalidates Gemini identity and timing before card selection, forecasts, warnings
+and SUS. Label-only cached reports from older agents show unavailable until
+updated. Fixture provenance and the live-capture limitation are documented in
+[the synthetic fixture notes](internal/usage/testdata/antigravity/README.md).
+The collector requires an existing CLI session
 and never starts sign-in when its session file is absent. Set
 `HS_PI_DASHBOARD_AGY_BIN` if the service cannot find the CLI. A 15-second
 CLI deadline and 4 MiB output bound apply. The CLI and legacy HTTP fallback
-share one 20-second refresh deadline. When CLI usage is unavailable, legacy
-quota pools remain visible with an explicit warning and no SUS. These are live
-readings, labeled separately from cached refresh failures. Grok coverage
+share one 20-second refresh deadline. When CLI usage is unavailable, the HTTP
+endpoint may supply only canonical Gemini windows, with an explicit source
+warning and no SUS. An endpoint without valid Gemini reports unavailable.
+These are live readings, labeled separately from cached refresh failures. Grok coverage
 warnings also describe the current scan rather than cached quota data.
 
 Grok / X has no available quota data, so it shows observed turns over the last

@@ -461,6 +461,23 @@ function remainingMs(resetAt) {
   const ms = Date.parse(resetAt) - Date.now();
   return Number.isFinite(ms) ? Math.max(0, ms) : null;
 }
+// Canonical identities, never display labels, select Gemini Models. Old agents
+// did not send identities, so their cached/blended cards cannot prove a pool.
+function geminiCard(card) {
+  if (card.key !== "antigravity") return card;
+  const specs = [["gemini-5h", "Gemini 5h", 18000], ["gemini-weekly", "Gemini W", 604800]];
+  const gauges = specs.map(([bucketId, label, seconds]) => {
+    const matches = (Array.isArray(card.gauges) ? card.gauges : []).filter(g => g?.bucketId === bucketId);
+    const g = matches.length === 1 ? matches[0] : null;
+    const reset = Date.parse(g?.resetAt || "");
+    if (!g || g.disabled || !Number.isFinite(g.usedPercent) || g.usedPercent < 0 || g.usedPercent > 100
+        || g.windowSeconds !== seconds || !Number.isFinite(reset) || reset <= Date.now()) {
+      return {bucketId, label, usedPercent:null, unavailable:true};
+    }
+    return {...g, bucketId, label, projectedEnd:projectedPercent(g.projectedEnd)};
+  });
+  return {...card, kind:"quota", label:"Antigravity", gauges, balanceUsd:undefined};
+}
 // The forecast belongs to the moment the agent fetched it, so the run-out
 // instant is anchored there and cached readings keep counting down during an
 // outage instead of drifting with the shrinking reset horizon.
@@ -495,10 +512,11 @@ function windowState(g, provider, fetchedAt, cardError = "", providerKey = "", c
       }
     } else status = used >= 85 || (projected ?? 0) >= 85 ? "tight" : "ok";
   }
-  const result = { provider, raw: g.label, label: windowLabel(g.label), used, projected, remaining, status, runsOutMs, runsOutAt, fetchedAt, cardError, cardWarning };
+  const result = { provider, bucketId:g.bucketId, unavailable:g.unavailable, raw: g.label, label: windowLabel(g.label), used, projected, remaining, status, runsOutMs, runsOutAt, fetchedAt, cardError, cardWarning,
+    attemptOnly:providerKey === "antigravity" && used == null };
   result.susEligible = ["claude","codex","antigravity"].includes(providerKey || String(provider).toLowerCase())
     && windowName(g.label).period === "weekly"
-    && ((providerKey || String(provider).toLowerCase()) === "antigravity" || String(g.label).toLowerCase() === "weekly");
+    && ((providerKey || String(provider).toLowerCase()) === "antigravity" ? g.bucketId === "gemini-weekly" : String(g.label).toLowerCase() === "weekly");
   result.sus = subscriptionScore(g, result);
   return result;
 }
@@ -525,7 +543,7 @@ function susMarkup(score,label="SUS",reason="Not enough weekly history or no quo
 }
 function fleetSubscriptionScore(groups) {
   const scored = groups.map(({card,windows}) => {
-    const values = windows.map(w=>w.sus).filter(Number.isFinite);
+    const values = windows.filter(w=>card.key !== "antigravity" || w.bucketId === "gemini-weekly").map(w=>w.sus).filter(Number.isFinite);
     if (!values.length) return null;
     const defaults = {claude:200,codex:200,antigravity:19.99};
     const price = card.subscriptionPriceUsd === undefined ? defaults[card.key] : card.subscriptionPriceUsd;
@@ -568,7 +586,7 @@ function quotaRow(w, lead = false) {
   const phrase = statusPhrase(w);
   const used = w.used == null ? '<span class="udash" aria-hidden="true">—</span><span class="ulbl">no reading</span>' : pctText(w.used) + '<span class="ulbl"> used</span>';
   const forecast = w.projected == null
-    ? `<span class="uphrase">${w.used == null ? "no reading" : ["no forecast", phrase].filter(Boolean).join(" · ")}</span>`
+    ? `<span class="uphrase">${w.used == null ? (w.unavailable ? "unavailable" : "no reading") : ["no forecast", phrase].filter(Boolean).join(" · ")}</span>`
     : `<b>${pctText(w.projected)}</b><span class="ulbl"> at reset</span>${phrase ? ` <span class="uphrase">${phrase}</span>` : ""}`;
   return `<li class="urow s-${w.status}${lead ? " ulead" : ""}"><span class="uwin">${esc(w.label)}${w.susEligible ? susMarkup(w.sus) : ""}</span>${runwayBar(w)}`
     + `<span class="uused">${used}</span><span class="ufc">${forecast}</span>`
@@ -577,7 +595,7 @@ function quotaRow(w, lead = false) {
 // Per-card freshness only when it matters: stale data or cached values kept
 // after a failed refresh. The section header carries the normal timestamp.
 function cardNote(card) {
-  if (card.error && card.kind !== "activity") {
+  if (card.error && card.kind !== "activity" && (card.key !== "antigravity" || hasUsageData(card))) {
     const age = rel(card.fetchedAt);
     return { text: "refresh failed · cached" + (age === "—" ? "" : age === "now" ? " just now" : " " + age), cls: "cached" };
   }
@@ -634,6 +652,7 @@ function headerStamp(source, cards) {
   return `<span class="ufresh">updated ${rel(oldest)}</span>`;
 }
 function failureText(card) {
+  if (card.key === "antigravity") return "Gemini Models unavailable; canonical Gemini quota evidence required";
   if (card.absent) return "no agent reports it yet; update agents to enable it";
   if (card.kind !== "quota" && card.kind !== "balance") return "no usage source yet";
   const what = card.kind === "balance" ? "balance" : "usage";
@@ -641,6 +660,7 @@ function failureText(card) {
   return card.kind === "balance" ? "no balance reported" : "no usage windows reported";
 }
 function hasUsageData(card) {
+  if (card.key === "antigravity") return card.gauges?.some(g=>Number.isFinite(g.usedPercent)) || false;
   return (card.kind === "billing" && !!card.billing) || (card.kind === "quota" && card.gauges?.length > 0) || (card.kind === "balance" && Number.isFinite(card.balanceUsd));
 }
 // Section verdict: the window that runs out first, so the answer stays
@@ -1094,11 +1114,12 @@ function renderUsage(fleet) {
         && reported.billing.month !== new Date().toISOString().slice(0, 7)
         ? {...reported, billing: undefined, error: "GitHub billing awaiting current UTC month collection"}
         : reported;
+      c = geminiCard(c);
       if (c.kind === "activity" && m.online === false) {
         c = {...c,error:[c.error,"Includes activity from an offline agent"].filter(Boolean).join("; ")};
       }
       const prev = byKey.get(c.key);
-      const better = !prev
+      const better = prev && c.key === "antigravity" && hasUsageData(prev) !== hasUsageData(c) ? hasUsageData(c) : !prev
         || (prev.error && !c.error)
         || ((!!prev.error === !!c.error)
             && (Date.parse(c.fetchedAt) || 0) > (Date.parse(prev.fetchedAt) || 0));
