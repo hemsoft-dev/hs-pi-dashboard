@@ -40,6 +40,7 @@ const (
 // the window timing allows it, shows ProjectedEnd — where usage lands at the
 // reset if the current pace holds (can exceed 100).
 type Gauge struct {
+	BucketID      string    `json:"bucketId,omitempty"` // canonical Antigravity pool identity
 	Label         string    `json:"label"`
 	UsedPercent   *float64  `json:"usedPercent"`
 	ResetAt       time.Time `json:"resetAt,omitzero"`
@@ -854,6 +855,9 @@ func (b *agBucket) UnmarshalJSON(data []byte) error {
 	type quotaBucket agBucket
 	var wire struct {
 		quotaBucket
+		BucketID  *string  `json:"bucketId"`
+		Fraction  *float64 `json:"remainingFraction"`
+		ResetTime *string  `json:"resetTime"`
 		ID        *string  `json:"id"`
 		Remaining *float64 `json:"remaining_fraction"`
 		Reset     *string  `json:"reset_time"`
@@ -862,6 +866,20 @@ func (b *agBucket) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	*b = agBucket(wire.quotaBucket)
+	if wire.BucketID != nil {
+		b.BucketID = *wire.BucketID
+	}
+	if wire.Fraction != nil {
+		b.RemainingFraction = wire.Fraction
+	}
+	if wire.ResetTime != nil {
+		b.ResetTime = *wire.ResetTime
+	}
+	if wire.ID != nil && wire.BucketID != nil && *wire.ID != *wire.BucketID ||
+		wire.Remaining != nil && wire.Fraction != nil && *wire.Remaining != *wire.Fraction ||
+		wire.Reset != nil && wire.ResetTime != nil && *wire.Reset != *wire.ResetTime {
+		return fmt.Errorf("ambiguous antigravity bucket")
+	}
 	if wire.ID != nil {
 		b.BucketID = *wire.ID
 	}
@@ -879,9 +897,6 @@ var agSpecs = []struct {
 }{
 	{"gemini-5h", "5h", "Gemini 5h"},
 	{"gemini-weekly", "weekly", "Gemini W"},
-	{"gemini-argon-wtu-weekly", "weekly", "Argon W"},
-	{"3p-5h", "5h", "3P 5h"},
-	{"3p-weekly", "weekly", "3P W"},
 }
 
 func (f *Fetcher) antigravityLegacy(ctx context.Context) Card {
@@ -951,7 +966,7 @@ func (f *Fetcher) fetchAntigravityQuota(ctx context.Context, token string) ([]Ga
 func parseAntigravityWindows(body []byte) ([]Gauge, error) {
 	var root struct {
 		Groups []struct {
-			Buckets []agBucket `json:"buckets"`
+			Buckets []json.RawMessage `json:"buckets"`
 		} `json:"groups"`
 	}
 	if err := json.Unmarshal(body, &root); err != nil {
@@ -960,18 +975,30 @@ func parseAntigravityWindows(body []byte) ([]Gauge, error) {
 	now := time.Now()
 	var gauges []Gauge
 	for _, spec := range agSpecs {
-		var matches []agBucket
+		var matches []json.RawMessage
 		for _, g := range root.Groups {
-			for _, b := range g.Buckets {
-				if b.BucketID == spec.key {
-					matches = append(matches, b)
+			for _, raw := range g.Buckets {
+				// Count identities before decoding values, so a malformed duplicate
+				// cannot make an ambiguous pool look like a single valid reading.
+				var identity map[string]json.RawMessage
+				if json.Unmarshal(raw, &identity) != nil {
+					continue
+				}
+				var bucketID, id string
+				_ = json.Unmarshal(identity["bucketId"], &bucketID)
+				_ = json.Unmarshal(identity["id"], &id)
+				if bucketID == spec.key || id == spec.key {
+					matches = append(matches, raw)
 				}
 			}
 		}
 		if len(matches) != 1 {
 			continue
 		}
-		b := matches[0]
+		var b agBucket
+		if json.Unmarshal(matches[0], &b) != nil {
+			continue
+		}
 		if b.Window != spec.window || b.Disabled || b.RemainingFraction == nil || *b.RemainingFraction < 0 || *b.RemainingFraction > 1 {
 			continue
 		}
@@ -985,6 +1012,7 @@ func parseAntigravityWindows(body []byte) ([]Gauge, error) {
 		}
 		value := math.Round(100*(1-*b.RemainingFraction)*100) / 100
 		gauge := Gauge{
+			BucketID:      spec.key,
 			Label:         spec.label,
 			UsedPercent:   &value,
 			ResetAt:       resetAt.UTC(),
@@ -997,7 +1025,7 @@ func parseAntigravityWindows(body []byte) ([]Gauge, error) {
 		gauges = append(gauges, gauge)
 	}
 	if len(gauges) == 0 {
-		return nil, fmt.Errorf("no quota buckets")
+		return nil, fmt.Errorf("antigravity Gemini Models quota unavailable: no valid Gemini buckets")
 	}
 	return gauges, nil
 }

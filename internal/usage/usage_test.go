@@ -83,17 +83,14 @@ func TestParseAntigravityWindows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(gauges) != 3 {
-		t.Fatalf("gauges = %d, want 3 (disabled bucket excluded)", len(gauges))
+	if len(gauges) != 2 {
+		t.Fatalf("gauges = %d, want 2 (only Gemini buckets)", len(gauges))
 	}
 	if gauges[0].Label != "Gemini 5h" || gauges[0].UsedPercent == nil || *gauges[0].UsedPercent != 10 {
 		t.Fatalf("gemini 5h = %+v", gauges[0])
 	}
 	if gauges[1].Label != "Gemini W" || gauges[1].UsedPercent == nil || *gauges[1].UsedPercent != 28 {
 		t.Fatalf("gemini W = %+v", gauges[1])
-	}
-	if gauges[2].Label != "3P W" || gauges[2].UsedPercent == nil || *gauges[2].UsedPercent != 90 {
-		t.Fatalf("3p W = %+v", gauges[2])
 	}
 }
 
@@ -279,11 +276,11 @@ func TestRefreshRetainsOriginalReadingOnFailuresAndRecovers(t *testing.T) {
 	}
 }
 
-func TestAntigravityArgonIsIndependentWeeklyBucket(t *testing.T) {
+func TestAntigravityArgonCannotSupplyGeminiMetrics(t *testing.T) {
 	reset := time.Now().Add(72 * time.Hour).UTC().Format(time.RFC3339)
 	body := []byte(`{"groups":[{"buckets":[{"bucketId":"gemini-weekly","window":"weekly","remainingFraction":0.8,"resetTime":"` + reset + `"},{"bucketId":"gemini-argon-wtu-weekly","window":"weekly","remainingFraction":0.3,"resetTime":"` + reset + `"}]}]}`)
 	gauges, err := parseAntigravityWindows(body)
-	if err != nil || len(gauges) != 2 || gauges[0].Label != "Gemini W" || gauges[1].Label != "Argon W" || *gauges[1].UsedPercent != 70 {
+	if err != nil || len(gauges) != 1 || gauges[0].Label != "Gemini W" || *gauges[0].UsedPercent != 20 {
 		t.Fatal(gauges, err)
 	}
 }
