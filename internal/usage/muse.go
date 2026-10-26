@@ -90,7 +90,14 @@ func (f *Fetcher) museCode(ctx context.Context) Card {
 	} else {
 		f.muse.failures = 0
 	}
-	f.muse.card, f.muse.next = &card, now.Add(wait+rand.N(museJitter))
+	next := now.Add(wait + rand.N(museJitter))
+	for _, g := range card.Gauges {
+		// A cached reading never outlives a window it describes.
+		if g.ResetAt.Before(next) {
+			next = g.ResetAt
+		}
+	}
+	f.muse.card, f.muse.next = &card, next
 	return card
 }
 

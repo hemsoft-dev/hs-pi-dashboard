@@ -6,7 +6,7 @@ non-inference. The reader in `../../muse.go` runs it with `META_API_KEY`
 removed and `MUSE_LOGIN=0`, `MUSE_NO_AUTO_UPDATE=1`. It closes stdin, discards
 stderr, runs in the home directory, caps stdout at 4 MiB and allows 15 s within
 the 20 s card budget. `HS_PI_DASHBOARD_MUSE_BIN` must be an absolute path. A
-reading is reused for 5 minutes. Failures back off 5, 10, 20, then 30 minutes.
+reading is reused for 5 minutes, or until its earliest window resets. Failures back off 5, 10, 20, then 30 minutes.
 Each interval adds up to 30 s of jitter.
 
 ## Fixtures

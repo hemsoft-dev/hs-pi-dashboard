@@ -211,6 +211,29 @@ func TestMuseCardCachesReadingsAndBacksOffFailures(t *testing.T) {
 	}
 }
 
+func TestMuseCachedReadingExpiresAtTheEarliestWindowReset(t *testing.T) {
+	calls := 0
+	reset := time.Now().Add(time.Minute)
+	f := &Fetcher{museRun: func(context.Context) ([]byte, error) {
+		calls++
+		return []byte(`{"schemaVersion":1,"allowance":{"asOfMs":` + jsonInt(time.Now().UnixMilli()) +
+			`,"window":{"resetsAtMs":` + jsonInt(reset.UnixMilli()) + `,"usedPercent":100},"weekly":{"resetsAtMs":` +
+			jsonInt(time.Now().Add(72*time.Hour).UnixMilli()) + `,"usedPercent":40}}}`), nil
+	}}
+	if card := f.museCode(context.Background()); card.Error != "" || len(card.Gauges) != 2 {
+		t.Fatal(card)
+	}
+	if !f.muse.next.Equal(reset.Truncate(time.Millisecond).UTC()) {
+		t.Fatalf("cache expires %s, window resets %s", f.muse.next, reset)
+	}
+	// Once the exhausted window resets, the next refresh reads again.
+	f.muse.next = time.Now().Add(-time.Millisecond)
+	f.museCode(context.Background())
+	if calls != 2 {
+		t.Fatal("expired reading served from cache", calls)
+	}
+}
+
 func jsonInt(v int64) string { b, _ := json.Marshal(v); return string(b) }
 
 func TestMuseMissingCLIIsActionableAndLaunchesNothing(t *testing.T) {
