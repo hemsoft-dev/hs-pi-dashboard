@@ -79,6 +79,52 @@ These are display preferences; agents keep refreshing their cached readings.
 A provider you switch on that no agent reports yet, such as Claude with older
 agents, is listed under **Not reporting** until the agents are updated.
 
+Codex reads `~/.pi/agent/auth.json` first, using `openai-codex.access` and
+`accountId`. Only an absent or unreadable Pi token falls back to
+`~/.codex/auth.json` and its `tokens.access_token` / `account_id`. A failed Pi
+request does not silently switch to CLI credentials. These paths are relative
+to the agent process user's home; this collector does not use `CODEX_HOME`.
+CLI sign-in alone does not replace the preferred Pi session. For human recovery
+on Home, start Pi as Windows user `User`, then enter `/login openai-codex`
+inside Pi and choose the correct ChatGPT account. The dashboard does not launch
+login, refresh tokens or change credential files.
+
+Codex cards expose only allowlisted credential-source, usage-response plan and
+window-shape metadata. Tokens, emails and account IDs are never published.
+JWT account identity may select the request workspace and bind cache reuse
+privately; JWT plan claims never prove a current paid quota. The authenticated
+usage response's `plan_type` is the plan evidence. Recognized plan tokens are
+`plus`, `pro`, `prolite`, `promax`, `team`, `business`, `enterprise` and `edu`.
+`free` is reported for diagnosis but supplies no paid quota. These tokens follow
+the [Codex account model](https://github.com/openai/codex/blob/e84504b2c716ec16018a396b0a7b7026387ac9ac/codex-rs/protocol/src/account.rs)
+and [usage-response mapping](https://github.com/openai/codex/blob/e84504b2c716ec16018a396b0a7b7026387ac9ac/codex-rs/backend-client/src/client.rs).
+The dashboard supports exact 18,000-second and 604,800-second quota windows for
+these plans. No currently supported plan proves a monthly allowance. Missing,
+Free, unknown, malformed and legacy plan evidence, and any unsupported window
+including 30 days, remain unavailable without a zero or forecast.
+
+All selected Codex reporters are compared before freshness/health selection.
+Different verified plans or incompatible window families show **account
+mismatch** in the section summary and body, with reporting host, safe plan,
+source and stale/offline context. All Codex quotas and Fleet SUS are withheld
+during a mismatch. This is evidence of disagreement, not proof of which account
+is correct. Equal plans/windows cannot prove equal accounts because account
+identifiers are deliberately not published. Missing metadata or a failed host
+alone does not establish a mismatch. A healthy verified reporter can replace
+an unknown or failed one, but conflicting stale/offline evidence remains visible
+until that reporter updates or is removed from the fleet. Missing 5-hour or
+weekly windows are legitimate partial reports. Stale, offline and failed
+same-account cached readings retain measured percentages but lose forecasts,
+Codex SUS and Fleet SUS. Credential source/account changes inhibit quota cache
+reuse; when no account identity exists, even a token change invalidates it.
+Successful unsupported responses replace the previous paid reading immediately.
+
+For synthetic local UI validation, run `node scripts/codex-fixture.cjs` and open
+the printed loopback URL with `?state=mismatch`, `?state=matching` or
+`?state=unknown`. The fixture serves the current embedded HTML/assets, labels
+the page synthetic, and supplies only invented snapshots. It never reads
+credentials or calls a provider.
+
 Claude reports subscription quotas from the read-only
 `GET https://api.anthropic.com/api/oauth/usage` endpoint with the
 `anthropic-beta: oauth-2025-04-20` header and a Claude Code `User-Agent` (some

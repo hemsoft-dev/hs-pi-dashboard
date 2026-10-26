@@ -421,3 +421,12 @@ limitation stays visible; an owner-confirmed disabled policy is explicitly label
 as agent configuration. Expected Business seats stay in net totals without a
 usage alert, while unknown Copilot SKUs and actual AI-credit charges remain alerts. Tables scroll within labeled keyboard-focusable regions
 on phones; provider selection removes the card and its alerts together.
+
+### Codex account evidence
+
+Codex account disagreement appears in the Usage summary even when collapsed,
+with a wrapping status notice above the existing runway rows. The notice uses
+the incumbent 12px monospace body, 14px panel padding, coral failure text and
+muted host/plan/source details. Unproven quota rows show unavailable values;
+no measured fill, forecast or numeric Fleet SUS is shown. Provider groups keep
+their existing layout, collapse controls and source notes.

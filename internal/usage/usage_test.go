@@ -62,8 +62,8 @@ func TestParseGoWindowsIgnoresCaseTrap(t *testing.T) {
 }
 
 func TestParseCodexWindowsNullSecondary(t *testing.T) {
-	body := []byte(`{"rate_limit":{"primary_window":{"used_percent":0,"limit_window_seconds":604800,"reset_after_seconds":603701,"reset_at":1789435382},"secondary_window":null}}`)
-	gauges, err := parseCodexWindows(body)
+	body := []byte(`{"plan_type":"pro","rate_limit":{"primary_window":{"used_percent":0,"limit_window_seconds":604800,"reset_after_seconds":603701,"reset_at":1789435382},"secondary_window":null}}`)
+	gauges, _, _, err := parseCodexWindows(body)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,6 +161,7 @@ func TestAgentUsageEndpointServesCachedSnapshot(t *testing.T) {
 
 func TestContextCancellationPropagates(t *testing.T) {
 	f := New()
+	f.Home = t.TempDir()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	for _, card := range f.FetchAll(ctx) {
@@ -176,8 +177,8 @@ func base64URLEncode(s string) string {
 
 func TestCodexMissingUsageAndResetSerializeAsUnavailable(t *testing.T) {
 	future := time.Now().Add(time.Hour).Unix()
-	body := []byte(fmt.Sprintf(`{"rate_limit":{"primary_window":{"reset_at":%d,"limit_window_seconds":604800},"secondary_window":{"used_percent":0,"limit_window_seconds":18000}}}`, future))
-	gauges, err := parseCodexWindows(body)
+	body := []byte(fmt.Sprintf(`{"plan_type":"pro","rate_limit":{"primary_window":{"reset_at":%d,"limit_window_seconds":604800},"secondary_window":{"used_percent":0,"limit_window_seconds":18000}}}`, future))
+	gauges, _, _, err := parseCodexWindows(body)
 	if err != nil || len(gauges) != 2 {
 		t.Fatalf("gauges=%+v err=%v", gauges, err)
 	}
@@ -221,7 +222,7 @@ func TestRefreshRetainsOriginalReadingOnFailuresAndRecovers(t *testing.T) {
 			codexRequests.Add(1)
 			if phase.Load() != 1 {
 				status = 200
-				body = fmt.Sprintf(`{"rate_limit":{"primary_window":{"used_percent":%d,"limit_window_seconds":604800}}}`, phase.Load()*25)
+				body = fmt.Sprintf(`{"plan_type":"pro","rate_limit":{"primary_window":{"used_percent":%d,"limit_window_seconds":604800}}}`, phase.Load()*25)
 			}
 		} else if r.URL.String() == moonshotBalance && phase.Load() != 1 {
 			status = 200
