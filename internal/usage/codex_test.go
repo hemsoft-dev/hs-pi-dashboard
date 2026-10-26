@@ -247,6 +247,7 @@ func TestCodexDiagnosticRetentionWithoutGauges(t *testing.T) {
 				failed = true
 				for attempt := 0; attempt < 3; attempt++ {
 					current := f.codex(context.Background())
+					current.FetchedAt = initial.FetchedAt.Add(time.Duration(attempt+1) * time.Hour)
 					retained := s.retain([]Card{current})[0]
 					if retained.Gauges != nil || retained.Plan != initial.Plan || !reflect.DeepEqual(retained.Codex, initial.Codex) || !retained.FetchedAt.Equal(initial.FetchedAt) || retained.Error != current.Error || retained.Error == initial.Error {
 						t.Fatalf("diagnostic lost or replaced by new attempt: %+v", retained)
@@ -305,8 +306,12 @@ func TestCodexDiagnosticCacheBoundariesAndRecovery(t *testing.T) {
 				status, body = 200, `{"plan_type":"prolite","rate_limit":{"primary_window":{"used_percent":9,"limit_window_seconds":604800}}}`
 			}
 			s.snapshot.Cards = []Card{old}
-			got := s.retain([]Card{f.codex(context.Background())})[0]
-			if got.FetchedAt.Equal(old.FetchedAt) {
+			current := f.codex(context.Background())
+			// Collection calls may share a clock tick on Windows. Assert cache
+			// timestamps with distinct controlled values, not elapsed wall time.
+			current.FetchedAt = old.FetchedAt.Add(time.Hour)
+			got := s.retain([]Card{current})[0]
+			if !got.FetchedAt.Equal(current.FetchedAt) {
 				t.Fatal("old diagnostic age crossed boundary or replaced new response")
 			}
 			if change == "recovery" {
@@ -317,9 +322,11 @@ func TestCodexDiagnosticCacheBoundariesAndRecovery(t *testing.T) {
 				// fresh timestamp; it must not inherit the previous plan/windows.
 				s.snapshot.Cards = []Card{got}
 				body = `{"plan_type":"unknown","rate_limit":{"primary_window":{"used_percent":0,"limit_window_seconds":2592000}}}`
-				next := s.retain([]Card{f.codex(context.Background())})[0]
-				if next.Plan != "unknown" || next.Gauges != nil || next.Error == "" || !reflect.DeepEqual(next.Codex.Windows, []string{"30d"}) || !next.FetchedAt.After(got.FetchedAt) {
-					t.Fatal("successful unsupported state did not replace previous evidence")
+				unsupported := f.codex(context.Background())
+				unsupported.FetchedAt = old.FetchedAt.Add(2 * time.Hour)
+				next := s.retain([]Card{unsupported})[0]
+				if next.Plan != "unknown" || next.Gauges != nil || next.Error == "" || !reflect.DeepEqual(next.Codex.Windows, []string{"30d"}) || !next.FetchedAt.Equal(unsupported.FetchedAt) {
+					t.Fatalf("successful unsupported state did not replace previous evidence: plan=%q gauges=%v error=%q windows=%v fetchedAt=%s", next.Plan, next.Gauges, next.Error, next.Codex.Windows, next.FetchedAt)
 				}
 			} else if got.Plan != "" || got.Gauges != nil || got.Codex.PlanSource != "" || len(got.Codex.Windows) != 0 {
 				t.Fatal("unverified or other-identity diagnostic was retained")
