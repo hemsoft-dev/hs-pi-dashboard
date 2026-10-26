@@ -153,6 +153,7 @@
   .ufc { color: var(--muted); }
   .ufc b { color: var(--text); font-weight: 600; }
   .ufc .uphrase, .ureset, .unote, .ufresh, .umore, .ubals li > span { white-space: nowrap; }
+  .umore.codex-diagnostic { white-space: normal; }
   .ureset { color: var(--muted); }
   .s-tight .ufc b, .s-tight .uused { color: var(--gold); }
   .s-risk .ufc, .s-risk .ufc b, .s-out .ufc, .s-out .ufc b, .s-out .uused { color: var(--ember); }
@@ -1279,7 +1280,7 @@ function renderUsage(fleet) {
   }
   const quotaAttempts = cards.filter((c) => c.kind === "quota").map((c) => ({ fetchedAt: c.fetchedAt, cardError: c.error, attemptOnly: true }));
   summary.innerHTML = `<span class="uverdict s-${verdict.status}">${esc(verdict.text)}`
-    + `${verdict.more ? ` <span class="umore"><span class="usep">· </span>${esc(verdict.more)}</span>` : ""}</span>`
+    + `${verdict.more ? ` <span class="umore${accountMismatch || codexUnavailable ? " codex-diagnostic" : ""}"><span class="usep">· </span>${esc(verdict.more)}</span>` : ""}</span>`
     + susMarkup(fleetSubscriptionScore(groups),"Fleet SUS")
     + `<span class="usr">, </span>${headerStamp([...(verdict.source ?? quotaAttempts), ...groups.flatMap(g=>g.windows).filter(w=>Number.isFinite(w.sus))], cards)}`;
 
