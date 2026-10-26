@@ -595,17 +595,25 @@ function quotaRow(w, lead = false) {
 // Per-card freshness only when it matters: stale data or cached values kept
 // after a failed refresh. The section header carries the normal timestamp.
 function cardNote(card) {
+  const at = readingAt(card);
   if (card.error && card.kind !== "activity" && (card.key !== "antigravity" || hasUsageData(card))) {
-    const age = rel(card.fetchedAt);
+    const age = rel(at);
     return { text: "refresh failed · cached" + (age === "—" ? "" : age === "now" ? " just now" : " " + age), cls: "cached" };
   }
-  const fetched = Date.parse(card.fetchedAt || "");
+  const fetched = Date.parse(at || "");
   if (!Number.isFinite(fetched)) return { text: "update time unavailable", cls: "" };
-  return Date.now() - fetched > USAGE_STALE_MS ? { text: `stale · ${rel(card.fetchedAt)}`, cls: "" } : null;
+  return Date.now() - fetched > Math.max(USAGE_STALE_MS, Number(card.freshForSeconds || 0)*1000) ? { text: `stale · ${rel(at)}`, cls: "" } : null;
+}
+// A provider's own observation time (Muse Code's asOf) can predate the
+// agent's fetch; the older of the two is the reading's real age.
+function readingAt(card) {
+  const observed = Date.parse(card.observedAt || ""), fetched = Date.parse(card.fetchedAt || "");
+  return Number.isFinite(observed) && (!Number.isFinite(fetched) || observed < fetched) ? card.observedAt : card.fetchedAt;
 }
 function noteHtml(card) {
   const note = cardNote(card);
-  return (card.warning ? `<span class="unote warning">${esc(card.warning)}</span>` : "")
+  return (card.plan ? `<span class="unote">${esc(card.plan)}</span>` : "")
+    + (card.warning ? `<span class="unote warning">${esc(card.warning)}</span>` : "")
     + (note ? `<span class="unote${note.cls ? " " + note.cls : ""}">${esc(note.text)}</span>` : "");
 }
 // Clauses wrap as whole units; each separator trails its clause so a wrapped
@@ -1002,6 +1010,7 @@ const USAGE_PROVIDERS = [
   { key: "codex", label: "Codex" }, { key: "claude", label: "Claude" },
   { key: "opencode-go", label: "OpenCode Go" }, { key: "antigravity", label: "Antigravity" },
   { key: "opencode-zen", label: "OpenCode Zen" }, { key: "moonshot", label: "Moonshot AI" }, {key:"grok",label:"Grok / X"},
+  { key: "muse-code", label: "Muse Code" },
 ];
 function loadUsageProviders() {
   try {
@@ -1122,7 +1131,7 @@ function renderUsage(fleet) {
       const better = prev && c.key === "antigravity" && hasUsageData(prev) !== hasUsageData(c) ? hasUsageData(c) : !prev
         || (prev.error && !c.error)
         || ((!!prev.error === !!c.error)
-            && (Date.parse(c.fetchedAt) || 0) > (Date.parse(prev.fetchedAt) || 0));
+            && (Date.parse(readingAt(c)) || 0) > (Date.parse(readingAt(prev)) || 0));
       if (c.kind === "activity" && c.activity && prev?.activity) {
         const events = new Map();
         for (const event of [...(prev.activity.events || []),...(c.activity.events || [])]) {
@@ -1153,7 +1162,7 @@ function renderUsage(fleet) {
   // out first leads the board.
   const groups = cards
     .filter((c) => c.kind === "quota" && c.gauges?.length)
-    .map((c) => ({ card: c, windows: c.gauges.map((g) => windowState(g, c.label, c.fetchedAt, c.error, c.key, c.warning)).sort(compareUrgency) }))
+    .map((c) => ({ card: c, windows: c.gauges.map((g) => ({...windowState(g, c.label, readingAt(c), c.error, c.key, c.warning), freshForSeconds:c.freshForSeconds})).sort(compareUrgency) }))
     .sort((a, b) => compareUrgency(a.windows[0], b.windows[0]));
   const billingCards = cards.filter((c) => c.kind === "billing");
   const balances = cards.filter((c) => c.kind === "balance" && Number.isFinite(c.balanceUsd));

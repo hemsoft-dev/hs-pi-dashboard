@@ -110,6 +110,19 @@ The schema and authentication headers were checked against
 and its
 [scoped weekly parser](https://github.com/steipete/CodexBar/blob/59a7d46ac61338786e5d32d8324a3e414525e601/Sources/CodexBarCore/Providers/Claude/ClaudeWeb/ClaudeWebExtraRateWindowParser.swift).
 
+Muse Code reports its subscription allowance from `muse usage --json`
+(Muse Code 1.4.13+), a command that runs no model turn. The agent runs it
+with `META_API_KEY` removed (an exported key would switch to pay-as-you-go),
+`MUSE_LOGIN=0` and `MUSE_NO_AUTO_UPDATE=1`, so it never signs in or updates
+the CLI, and it reads no credential files. A reading is reused for five
+minutes, or until its earliest window resets; failures back off from 5 to 30 minutes. A window that fails
+validation, an undocumented window or an old observation adds a warning. The short window and the
+weekly window become `5h` and `Weekly` rows with the tier as a note. A missing
+CLI, `allowance: null`, an unsupported schema or malformed output shows under
+**Not reporting**, never as zero. The CLI's free-form `reason` and `hint` text
+is never shown. Muse Code has no SUS or price. Field mapping and fixtures:
+[`internal/usage/testdata/muse`](internal/usage/testdata/muse/README.md).
+
 The board is plain HTML and CSS embedded in the Go binary, with no chart
 library. `PRODUCT.md` and `DESIGN.md` record the product context and the
 gold-on-black design system for later UI work.

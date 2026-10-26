@@ -325,7 +325,7 @@ test('all-disabled state survives reload and keeps every choice available withou
   r.renderUsage({ machines: [] });
   assert.match(body.innerHTML, /No providers selected.*Choose providers/);
   assert.equal(summary.textContent, 'no providers selected');
-  assert.equal((options.innerHTML.match(/type="checkbox"/g) || []).length, 7);
+  assert.equal((options.innerHTML.match(/type="checkbox"/g) || []).length, 8);
   assert.doesNotMatch(options.innerHTML, / checked/);
   const reload = renderer(storage);
   reload.r.renderUsage({});
@@ -627,4 +627,57 @@ test('Antigravity blended balances and unrelated weekly scores cannot enter Flee
  const third=r.windowState({...scoredGauge(90,96,80,'Gemini W'),bucketId:'3p-weekly'},'Antigravity',new Date().toISOString(),'','antigravity');
  assert.equal(third.sus,null);assert.equal(third.susEligible,false);
  assert.equal(r.fleetSubscriptionScore([{card:{key:'antigravity'},windows:[{sus:100,bucketId:'3p-weekly'},{sus:80,bucketId:'gemini-argon-wtu-weekly'}]}]),null);
+});
+
+// Shape of the agent's Muse Code card (internal/usage/muse.go): the measured
+// fixture's values with resets moved relative to now.
+function museCard(overrides = {}) {
+  const observedAt = new Date(Date.now() - 60000).toISOString();
+  return { key: 'muse-code', label: 'Muse Code', kind: 'quota', subscriptionPriceUsd: null, plan: 'Muse Code Power Usage',
+    allowanceSource: 'mint', observedAt, fetchedAt: new Date().toISOString(), freshForSeconds: 420,
+    gauges: [
+      { bucketId: 'window', label: '5h', usedPercent: 15, resetAt: new Date(Date.now() + 4 * H).toISOString(), windowSeconds: 18000, projectedEnd: 75 },
+      { bucketId: 'weekly', label: 'Weekly', usedPercent: 5, resetAt: new Date(Date.now() + 150 * H).toISOString(), windowSeconds: 604800, projectedEnd: 46.9 },
+    ], ...overrides };
+}
+
+test('Muse Code renders measured windows and its plan without a SUS or price', () => {
+  const { r, body, options } = renderer();
+  const fleet = { machines: [{ name: 'mini', online: true, usage: { cards: [museCard()] } }, { name: 'home', online: true, usage: { cards: [card()] } }] };
+  r.renderUsage(fleet);
+  assert.match(options.innerHTML, /data-usage-provider="muse-code" checked><span>Muse Code/);
+  assert.match(body.innerHTML, /class="ucard-label">Muse Code<\/span><span class="unote">Muse Code Power Usage<\/span>/);
+  const muse = body.innerHTML.slice(body.innerHTML.indexOf('Muse Code'));
+  assert.match(muse, /5-hour.*15%<span class="ulbl"> used/);
+  assert.match(muse, /Weekly.*5%<span class="ulbl"> used/);
+  assert.doesNotMatch(muse.slice(0, muse.indexOf('</ul>')), /usus/);
+  assert.equal(r.fleetSubscriptionScore([{ card: museCard(), windows: museCard().gauges.map(g => r.windowState(g, 'Muse Code', museCard().observedAt, '', 'muse-code')) }]), null);
+});
+
+test('Muse Code unavailable, exhausted and stale states never read as healthy capacity', () => {
+  const { r, body } = renderer();
+  const unavailable = museCard({ gauges: undefined, plan: undefined, observedAt: undefined, error: 'allowance unavailable (CLI reported none)' });
+  r.renderUsage({ machines: [{ usage: { cards: [unavailable, card()] } }] });
+  assert.match(body.innerHTML, /Not reporting:<\/b> Muse Code/);
+  assert.match(body.innerHTML, /<b>Muse Code<\/b> couldn't read usage <code>\(allowance unavailable \(CLI reported none\)\)<\/code>/);
+  assert.doesNotMatch(body.innerHTML, /class="ucard-label">Muse Code/);
+
+  const exhausted = museCard({ gauges: [{ bucketId: 'window', label: '5h', usedPercent: 100, resetAt: new Date(Date.now() + H).toISOString(), windowSeconds: 18000, projectedEnd: 130 }] });
+  r.renderUsage({ machines: [{ usage: { cards: [exhausted] } }] });
+  assert.match(body.innerHTML, /limit reached/);
+
+  // A reading the provider observed long ago is stale even if fetched just now.
+  const old = museCard({ observedAt: new Date(Date.now() - 20 * 60000).toISOString() });
+  r.renderUsage({ machines: [{ usage: { cards: [old] } }] });
+  assert.match(body.innerHTML, /class="unote">stale · 20m ago/);
+  assert.doesNotMatch(r.noteHtml(museCard()), /stale/);
+});
+
+test('Muse Code reported by several agents is shown once, preferring a healthy reading', () => {
+  const { r, body } = renderer();
+  const failed = museCard({ error: 'muse usage timed out', fetchedAt: new Date().toISOString() });
+  const healthy = museCard({ fetchedAt: new Date(Date.now() - 30000).toISOString() });
+  r.renderUsage({ machines: [{ usage: { cards: [failed] } }, { usage: { cards: [healthy] } }] });
+  assert.equal((body.innerHTML.match(/class="ucard-label">Muse Code/g) || []).length, 1);
+  assert.doesNotMatch(body.innerHTML, /refresh failed/);
 });
