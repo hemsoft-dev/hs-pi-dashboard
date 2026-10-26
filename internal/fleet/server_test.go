@@ -186,3 +186,56 @@ func TestT3SourceHealthSurvivesRepeatedOfflinePolls(t *testing.T) {
 		}
 	}
 }
+
+func TestFleetCarriesMuseAllowanceFieldsAlongsideOldAgents(t *testing.T) {
+	// mini runs the new agent; old agents send no Muse card and keep working.
+	newAgent := `{"machine":"mini","cards":[{"key":"muse-code","label":"Muse Code","kind":"quota","subscriptionPriceUsd":null,` +
+		`"plan":"Muse Code Power Usage","allowanceSource":"mint","observedAt":"2026-10-26T17:54:05.064Z","freshForSeconds":420,` +
+		`"fetchedAt":"2026-10-26T17:54:06Z","gauges":[{"bucketId":"window","label":"5h","usedPercent":15,` +
+		`"resetAt":"2026-10-26T22:18:24Z","windowSeconds":18000,"projectedEnd":126.1},{"bucketId":"weekly","label":"Weekly",` +
+		`"usedPercent":5,"resetAt":"2026-11-02T00:00:00Z","windowSeconds":604800,"projectedEnd":46.9}]},` +
+		`{"key":"muse-code-unavailable-probe","label":"x","kind":"quota","error":"allowance unavailable (CLI reported none)","fetchedAt":"2026-10-26T17:54:06Z"}]}`
+	oldAgent := `{"machine":"home","cards":[{"key":"codex","label":"Codex","kind":"quota","fetchedAt":"2026-10-26T17:54:06Z","gauges":[{"label":"Weekly","usedPercent":10}]}]}`
+	serve := func(body string) *httptest.Server {
+		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(body)) }))
+	}
+	mini, home := serve(newAgent), serve(oldAgent)
+	defer mini.Close()
+	defer home.Close()
+	targets, err := ParseTargets("mini|" + mini.URL + ",home|" + home.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := NewServer(targets, time.Second)
+	server.pollUsage(context.Background())
+	rec := httptest.NewRecorder()
+	server.handleFleet(rec, httptest.NewRequest(http.MethodGet, "/api/fleet", nil))
+	var raw struct {
+		Machines []struct {
+			Name  string `json:"name"`
+			Usage struct {
+				Cards []map[string]any `json:"cards"`
+			} `json:"usage"`
+		} `json:"machines"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
+		t.Fatal(err)
+	}
+	muse := raw.Machines[0].Usage.Cards[0]
+	if muse["key"] != "muse-code" || muse["plan"] != "Muse Code Power Usage" || muse["allowanceSource"] != "mint" ||
+		muse["observedAt"] != "2026-10-26T17:54:05.064Z" || muse["freshForSeconds"] != 420.0 {
+		t.Fatalf("muse card=%v", muse)
+	}
+	gauges := muse["gauges"].([]any)
+	short := gauges[0].(map[string]any)
+	if len(gauges) != 2 || short["bucketId"] != "window" || short["usedPercent"] != 15.0 || short["windowSeconds"] != 18000.0 {
+		t.Fatalf("gauges=%v", gauges)
+	}
+	// An unavailable reading stays an error with no windows, never zero.
+	if probe := raw.Machines[0].Usage.Cards[1]; probe["error"] == nil || probe["gauges"] != nil {
+		t.Fatalf("unavailable=%v", probe)
+	}
+	if old := raw.Machines[1].Usage.Cards; len(old) != 1 || old[0]["key"] != "codex" || old[0]["plan"] != nil {
+		t.Fatalf("old agent=%v", old)
+	}
+}

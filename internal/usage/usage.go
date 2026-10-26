@@ -1,5 +1,5 @@
 // Package usage fetches provider plan/balance data for the dashboard cards:
-// Codex, Claude and OpenCode Go plan windows, Antigravity quota pools, and OpenCode
+// Codex, Claude, OpenCode Go and Muse Code plan windows, Antigravity quota pools, and OpenCode
 // Zen + Moonshot prepaid balances.
 //
 // The fetchers port the proven logic from ~/.pi/agent/extensions/statusline.ts
@@ -59,6 +59,9 @@ type Card struct {
 	Kind                 string    `json:"kind"`
 	BalanceUSD           *float64  `json:"balanceUsd,omitempty"`
 	Gauges               []Gauge   `json:"gauges,omitempty"`
+	Plan                 string    `json:"plan,omitempty"`            // provider-reported tier, allowlisted text
+	AllowanceSource      string    `json:"allowanceSource,omitempty"` // provider-reported source token
+	ObservedAt           time.Time `json:"observedAt,omitzero"`       // when the provider observed the reading
 	Warning              string    `json:"warning,omitempty"`
 	Error                string    `json:"error,omitempty"`
 	FetchedAt            time.Time `json:"fetchedAt"`
@@ -93,6 +96,8 @@ type Fetcher struct {
 	githubRateMu    sync.Mutex
 	githubRateUntil map[string]time.Time
 	claudeGate      claudeRateGate
+	muse            museCache
+	museRun         func(context.Context) ([]byte, error)
 }
 
 // New returns a fetcher with defaults.
@@ -145,29 +150,32 @@ func (s *Store) Start(ctx context.Context) {
 }
 
 func (s *Store) refresh(ctx context.Context) {
-	snapshot := Snapshot{
-		Machine:     s.machine,
-		GeneratedAt: time.Now(),
-		Cards:       s.fetcher.FetchAll(ctx),
-	}
+	cards := s.fetcher.FetchAll(ctx)
 	s.mu.Lock()
+	s.snapshot = Snapshot{Machine: s.machine, GeneratedAt: time.Now(), Cards: s.retain(cards)}
+	s.mu.Unlock()
+	s.readyOnce.Do(func() { close(s.ready) })
+}
+
+// retain keeps each failed card's last good reading from the current
+// snapshot. Callers hold s.mu.
+func (s *Store) retain(cards []Card) []Card {
 	previous := make(map[string]Card, len(s.snapshot.Cards))
 	for _, card := range s.snapshot.Cards {
 		previous[card.Key] = card
 	}
-	for i, card := range snapshot.Cards {
+	for i, card := range cards {
 		old, ok := previous[card.Key]
 		sameBillingMonth := old.Billing != nil && old.Billing.Month == card.FetchedAt.UTC().Format("2006-01")
 		if card.Error != "" && len(card.Gauges) == 0 && card.BalanceUSD == nil && card.Billing == nil && ok && old.Kind == card.Kind && (len(old.Gauges) > 0 || old.BalanceUSD != nil || sameBillingMonth) {
 			// Keep the reading's original age, including through repeated failures.
 			// Snapshots handed to callers remain immutable.
 			card.Gauges, card.BalanceUSD, card.Billing, card.FetchedAt = old.Gauges, old.BalanceUSD, old.Billing, old.FetchedAt
-			snapshot.Cards[i] = card
+			card.Plan, card.AllowanceSource, card.ObservedAt = old.Plan, old.AllowanceSource, old.ObservedAt
+			cards[i] = card
 		}
 	}
-	s.snapshot = snapshot
-	s.mu.Unlock()
-	s.readyOnce.Do(func() { close(s.ready) })
+	return cards
 }
 
 // Snapshot returns the most recent snapshot. Before the first refresh lands
@@ -188,7 +196,7 @@ func (s *Store) Snapshot() Snapshot {
 // fail return a card carrying the error; nothing panics or blocks long.
 func (f *Fetcher) FetchAll(ctx context.Context) []Card {
 	fetchers := [](func(context.Context) Card){
-		f.codex, f.opencodeGo, f.antigravity, f.opencodeZen, f.moonshot, f.claude, f.grokActivity,
+		f.codex, f.opencodeGo, f.antigravity, f.opencodeZen, f.moonshot, f.claude, f.museCode, f.grokActivity,
 	}
 	if org := envValue("GITHUB_BILLING_ORG"); org != "" {
 		fetchers = append(fetchers, func(ctx context.Context) Card { return f.cachedGitHubBilling(ctx, org, time.Now()) })
