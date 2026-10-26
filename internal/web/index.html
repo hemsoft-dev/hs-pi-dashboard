@@ -1266,8 +1266,14 @@ function renderUsage(fleet) {
   // With no quota windows at all, the verdict is about the quota cards, never a balance's timestamp.
   const codexUnavailable = cards.some(c=>c.key === "codex" && c.codexUnavailable);
   if (accountMismatch || codexUnavailable) {
-    verdict = {text:accountMismatch ? "Codex account mismatch" : "Codex unavailable",status:accountMismatch ? "risk" : "unknown",
-      more:[accountMismatch ? "check reporting accounts" : "quota or freshness unverified", ["risk","out","tight"].includes(verdict.status) ? verdict.text : "", verdict.more].filter(Boolean).join(" · "),
+    const diagnostic = accountMismatch ? "Codex account mismatch" : "Codex unavailable";
+    const diagnosticStatus = accountMismatch ? "risk" : "unknown";
+    const urgent = ["out","risk","tight"].includes(verdict.status);
+    // Keep actionable quota/billing meaning first; account diagnostics may
+    // raise the severity but must never lower an existing warning.
+    verdict = {text:urgent ? verdict.text : diagnostic,
+      status:urgent && USAGE_STATUS_RANK[verdict.status] > USAGE_STATUS_RANK[diagnosticStatus] ? verdict.status : diagnosticStatus,
+      more:[urgent ? diagnostic : "", accountMismatch ? "check reporting accounts" : "quota or freshness unverified", verdict.more].filter(Boolean).join(" · "),
       source:[...(verdict.source || []), ...codexReporters.map(r=>({fetchedAt:r.card.fetchedAt,cardError:codexRequestError(r.card),
         attemptOnly:accountMismatch || !r.verified || !r.card.gauges?.length}))]};
   }

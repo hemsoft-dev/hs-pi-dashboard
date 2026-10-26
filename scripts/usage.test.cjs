@@ -821,3 +821,50 @@ test('Codex metadata gaps or stale same-plan reporters do not alone establish a 
   assert.doesNotMatch(body.innerHTML,/account mismatch|Codex unavailable/);
   assert.match(summary.innerHTML,/Fleet SUS 63/);
 });
+
+function codexDiagnosticMachines(mode) {
+  const unavailable=codexMachine('Home',{plan:'free',gauges:[],error:'codex quota unavailable: verified paid plan required',
+    codex:{credentialSource:'pi',planSource:'usage-response',windows:['30d']}});
+  return mode === 'mismatch' ? [unavailable,codexMachine('Mini',{gauges:[gauge(9,63)]})] : [unavailable];
+}
+for (const mode of ['unavailable','mismatch']) {
+  for (const [status,used,projected,phrase] of [
+    ['out',100,null,'limit reached'],
+    ['risk',50,125,'runs out in'],
+    ['tight',90,95,'near limit'],
+  ]) {
+    test(`Codex diagnostics preserve Claude ${status} severity and primary meaning with ${mode}`,()=>{
+      const {r,summary,body}=renderer();
+      r.setUsageProvider('claude',true);
+      const machines=codexDiagnosticMachines(mode);
+      machines[0].usage.cards.push(card({key:'claude',label:'Claude',gauges:[gauge(used,projected,{
+        windowSeconds:604800,resetAt:new Date(Date.now()+24*H).toISOString()})]}));
+      r.renderUsage({machines});
+      const expected=mode === 'mismatch' && status === 'tight' ? 'risk' : status;
+      assert.match(summary.innerHTML,new RegExp(`<span class="uverdict s-${expected}">Claude weekly ${phrase}`));
+      assert.match(summary.innerHTML,mode === 'mismatch' ? /Codex account mismatch/ : /Codex unavailable/);
+      assert.match(summary.innerHTML,/Fleet SUS n\/a/);
+      assert.match(body.innerHTML,new RegExp(`urow s-${status} ulead`));
+      assert.match(body.innerHTML,mode === 'mismatch' ? /Codex account mismatch/ : /Codex unavailable/);
+    });
+  }
+  test(`Codex diagnostics preserve billing risk severity and primary meaning with ${mode}`,()=>{
+    for (const alert of [{error:'billing access unavailable'},{billing:{month:new Date().toISOString().slice(0,7),attention:true,products:[],budgets:[]}}]) {
+      const {r,summary}=renderer();
+      const machines=codexDiagnosticMachines(mode);
+      machines[0].usage.cards.push({key:'github-billing:fixture',label:'GitHub',kind:'billing',fetchedAt:new Date().toISOString(),...alert});
+      r.renderUsage({machines});
+      assert.match(summary.innerHTML,/<span class="uverdict s-risk">GitHub (unavailable|attention)/);
+      assert.match(summary.innerHTML,mode === 'mismatch' ? /Codex account mismatch/ : /Codex unavailable/);
+      assert.match(summary.innerHTML,/Fleet SUS n\/a/);
+    }
+  });
+  test(`Codex diagnostics keep Codex-only ${mode} states explicit`,()=>{
+    const {r,summary}=renderer();
+    r.renderUsage({machines:codexDiagnosticMachines(mode)});
+    assert.match(summary.innerHTML,mode === 'mismatch'
+      ? /<span class="uverdict s-risk">Codex account mismatch/ : /<span class="uverdict s-unknown">Codex unavailable/);
+    assert.match(summary.innerHTML,/Fleet SUS n\/a/);
+    assert.doesNotMatch(summary.innerHTML,/all plans on pace/);
+  });
+}
