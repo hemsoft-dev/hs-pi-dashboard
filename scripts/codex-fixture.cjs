@@ -4,18 +4,20 @@ const http = require('node:http');
 const {readFileSync} = require('node:fs');
 const path = require('node:path');
 const root = path.join(__dirname, '../internal/web');
-const states = new Set(['mismatch', 'matching', 'unknown']);
+const states = new Set(['mismatch', 'matching', 'unknown', 'failed-free']);
 function snapshot(state, claudeState) {
   const at = new Date().toISOString();
   const weekly = {label:'Weekly',usedPercent:9,projectedEnd:63,windowSeconds:604800,
     resetAt:new Date(Date.now()+6*86400000).toISOString()};
   const paid = {key:'codex',label:'Codex',kind:'quota',fetchedAt:at,plan:'prolite',subscriptionPriceUsd:100,
     codex:{credentialSource:'cli',planSource:'usage-response',windows:['weekly']},gauges:[weekly]};
-  const home = state === 'matching'
+  let home = state === 'matching'
     ? {...paid,codex:{...paid.codex,credentialSource:'pi'}}
     : state === 'unknown'
       ? {...paid,plan:'unknown',codex:{credentialSource:'pi',planSource:'usage-response',windows:['30d']},gauges:[],error:'codex quota unavailable: verified paid plan required'}
       : {...paid,plan:'free',codex:{credentialSource:'pi',planSource:'usage-response',windows:['30d']},gauges:[],error:'codex quota unavailable: verified paid plan required'};
+  if (state === 'failed-free') home=JSON.parse(readFileSync(path.join(__dirname,
+    '../internal/usage/testdata/codex/retained-free-30d.json'),'utf8'));
   const machine = (name, card) => ({name,online:true,generatedAt:at,sessions:[],activeSessions:0,usage:{machine:name,generatedAt:at,cards:[card]}});
   const fleet = {generatedAt:at,activeSessions:0,hermesSessions:[],machines:state === 'unknown'
     ? [machine('Home',home)] : [machine('Mini',paid),machine('Home',home)]};

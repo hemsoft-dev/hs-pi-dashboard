@@ -868,3 +868,22 @@ for (const mode of ['unavailable','mismatch']) {
     assert.doesNotMatch(summary.innerHTML,/all plans on pace/);
   });
 }
+
+test('retained no-gauge Free diagnostic keeps mismatch and Fleet SUS unavailable after refresh failures',()=>{
+  // Go's mocked collector + real Store test verifies this exact serialized card.
+  const retained=JSON.parse(readFileSync(path.join(__dirname,'../internal/usage/testdata/codex/retained-free-30d.json'),'utf8'));
+  for (const error of [retained.error,'Codex request failed','HTTP 503']) {
+    for (const reverse of [false,true]) {
+      const {r,summary,body}=renderer();
+      const machines=[codexMachine('Mini',{gauges:[gauge(9,63)]}),
+        {name:'Home',online:true,usage:{cards:[{...retained,error}]}}];
+      if(reverse) machines.reverse();
+      r.renderUsage({machines});
+      assert.match(summary.innerHTML,/<span class="uverdict s-risk">Codex account mismatch/);
+      assert.match(summary.innerHTML,/Fleet SUS n\/a/);
+      assert.match(body.innerHTML,/Home · free · Pi · 30-day unsupported · stale, refresh failed/);
+      assert.doesNotMatch(body.innerHTML,/ubar-used|ubar-fc|ubar-over|0% used/);
+      assert.match(summary.innerHTML,/refresh failed/);
+    }
+  }
+});

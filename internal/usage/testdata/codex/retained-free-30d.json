@@ -1,0 +1,10 @@
+{
+  "codex": {"credentialSource": "pi", "planSource": "usage-response", "windows": ["30d"]},
+  "subscriptionPriceUsd": null,
+  "key": "codex",
+  "label": "Codex",
+  "kind": "quota",
+  "plan": "free",
+  "error": "HTTP 401",
+  "fetchedAt": "2026-10-01T00:00:00Z"
+}

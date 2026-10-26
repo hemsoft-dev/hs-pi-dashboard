@@ -216,3 +216,114 @@ func TestCodexTransportErrorsDoNotLeakSecrets(t *testing.T) {
 		t.Fatal("unsafe transport error")
 	}
 }
+
+func TestCodexDiagnosticRetentionWithoutGauges(t *testing.T) {
+	for _, plan := range []string{"free", "pro", "unknown"} {
+		for _, failure := range []string{"http", "transport"} {
+			t.Run(plan+"/"+failure, func(t *testing.T) {
+				home := t.TempDir()
+				writeCodexAuth(t, home, "pi", "synthetic-token", "account-a")
+				failed := false
+				status := 401
+				f := &Fetcher{Home: home, Client: &http.Client{Transport: usageRoundTripper(func(*http.Request) (*http.Response, error) {
+					if failed && failure == "transport" {
+						return nil, errors.New("synthetic transport failure")
+					}
+					code := 200
+					if failed {
+						code = status
+					}
+					body := fmt.Sprintf(`{"plan_type":%q,"rate_limit":{"primary_window":{"used_percent":0,"limit_window_seconds":2592000}}}`, plan)
+					return &http.Response{StatusCode: code, Body: io.NopCloser(strings.NewReader(body))}, nil
+				})}}
+				initial := f.codex(context.Background())
+				initial.FetchedAt = time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+				if initial.Gauges != nil || initial.Error == "" || initial.Codex.PlanSource != "usage-response" {
+					t.Fatal("fixture did not collect authenticated unavailable evidence")
+				}
+				before, _ := json.Marshal(initial)
+				s := NewStore(f, "synthetic", time.Minute)
+				s.snapshot.Cards = []Card{initial}
+				failed = true
+				for attempt := 0; attempt < 3; attempt++ {
+					current := f.codex(context.Background())
+					retained := s.retain([]Card{current})[0]
+					if retained.Gauges != nil || retained.Plan != initial.Plan || !reflect.DeepEqual(retained.Codex, initial.Codex) || !retained.FetchedAt.Equal(initial.FetchedAt) || retained.Error != current.Error || retained.Error == initial.Error {
+						t.Fatalf("diagnostic lost or replaced by new attempt: %+v", retained)
+					}
+					if plan == "free" && failure == "http" && attempt == 0 {
+						fixture, err := os.ReadFile(filepath.Join("testdata", "codex", "retained-free-30d.json"))
+						if err != nil {
+							t.Fatal(err)
+						}
+						wire, _ := json.Marshal(retained)
+						var got, want any
+						if json.Unmarshal(wire, &got) != nil || json.Unmarshal(fixture, &want) != nil || !reflect.DeepEqual(got, want) {
+							t.Fatalf("renderer contract drift: %s", wire)
+						}
+					}
+					s.snapshot.Cards = []Card{retained}
+					status++ // each HTTP attempt's new error must survive retention
+				}
+				after, _ := json.Marshal(initial)
+				if string(before) != string(after) {
+					t.Fatal("retention mutated the published diagnostic")
+				}
+			})
+		}
+	}
+}
+
+func TestCodexDiagnosticCacheBoundariesAndRecovery(t *testing.T) {
+	for _, change := range []string{"account", "source", "removed", "unverified", "claim-only", "missing-metadata", "recovery"} {
+		t.Run(change, func(t *testing.T) {
+			home := t.TempDir()
+			writeCodexAuth(t, home, "pi", "synthetic-token", "account-a")
+			status, body := 200, `{"plan_type":"free","rate_limit":{"primary_window":{"used_percent":0,"limit_window_seconds":2592000}}}`
+			f := &Fetcher{Home: home, Client: &http.Client{Transport: usageRoundTripper(func(*http.Request) (*http.Response, error) {
+				return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(body))}, nil
+			})}}
+			old := f.codex(context.Background())
+			old.FetchedAt = time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+			s := NewStore(f, "synthetic", time.Minute)
+			status = 401
+			switch change {
+			case "account":
+				writeCodexAuth(t, home, "pi", "new-token", "account-b")
+			case "source":
+				writeCodexAuth(t, home, "pi", "", "")
+				writeCodexAuth(t, home, "cli", "cli-token", "account-a")
+			case "removed":
+				writeCodexAuth(t, home, "pi", "", "")
+			case "unverified":
+				old.Codex.PlanSource = ""
+			case "claim-only":
+				old.Codex.PlanSource = "jwt"
+			case "missing-metadata":
+				old.Codex = nil
+			case "recovery":
+				status, body = 200, `{"plan_type":"prolite","rate_limit":{"primary_window":{"used_percent":9,"limit_window_seconds":604800}}}`
+			}
+			s.snapshot.Cards = []Card{old}
+			got := s.retain([]Card{f.codex(context.Background())})[0]
+			if got.FetchedAt.Equal(old.FetchedAt) {
+				t.Fatal("old diagnostic age crossed boundary or replaced new response")
+			}
+			if change == "recovery" {
+				if got.Plan != "prolite" || got.Error != "" || len(got.Gauges) != 1 || !reflect.DeepEqual(got.Codex.Windows, []string{"weekly"}) {
+					t.Fatal("successful recovery did not replace diagnostic")
+				}
+				// A new unsupported response is also authoritative, including its
+				// fresh timestamp; it must not inherit the previous plan/windows.
+				s.snapshot.Cards = []Card{got}
+				body = `{"plan_type":"unknown","rate_limit":{"primary_window":{"used_percent":0,"limit_window_seconds":2592000}}}`
+				next := s.retain([]Card{f.codex(context.Background())})[0]
+				if next.Plan != "unknown" || next.Gauges != nil || next.Error == "" || !reflect.DeepEqual(next.Codex.Windows, []string{"30d"}) || !next.FetchedAt.After(got.FetchedAt) {
+					t.Fatal("successful unsupported state did not replace previous evidence")
+				}
+			} else if got.Plan != "" || got.Gauges != nil || got.Codex.PlanSource != "" || len(got.Codex.Windows) != 0 {
+				t.Fatal("unverified or other-identity diagnostic was retained")
+			}
+		})
+	}
+}

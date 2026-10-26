@@ -159,8 +159,8 @@ func (s *Store) refresh(ctx context.Context) {
 	s.readyOnce.Do(func() { close(s.ready) })
 }
 
-// retain keeps each failed card's last good reading from the current
-// snapshot. Callers hold s.mu.
+// retain keeps each failed card's last reading or authenticated Codex
+// diagnostic from the current snapshot. Callers hold s.mu.
 func (s *Store) retain(cards []Card) []Card {
 	previous := make(map[string]Card, len(s.snapshot.Cards))
 	for _, card := range s.snapshot.Cards {
@@ -168,9 +168,20 @@ func (s *Store) retain(cards []Card) []Card {
 	}
 	for i, card := range cards {
 		old, ok := previous[card.Key]
-		if card.Key == "codex" && (card.codexIdentity == [32]byte{} || card.codexIdentity != old.codexIdentity || card.Codex == nil || card.Codex.PlanSource != "") {
-			// A successful but unsupported response must replace the old quota.
-			// Failed requests may retain a reading only for the same credential identity.
+		if card.Key == "codex" {
+			if !ok || old.Kind != card.Kind || card.Error == "" ||
+				card.codexIdentity == [32]byte{} || card.codexIdentity != old.codexIdentity ||
+				card.Codex == nil || card.Codex.PlanSource != "" ||
+				old.Codex == nil || old.Codex.PlanSource != "usage-response" {
+				// Every new response replaces old evidence, even when unsupported.
+				// Failed requests retain only authenticated, same-identity evidence.
+				continue
+			}
+			// Rejected Free/unsupported responses have no gauges, but their plan
+			// and windows still diagnose account mismatch. Keep their original
+			// age independently of usable quota, and preserve the new error.
+			card.Codex, card.Plan, card.Gauges, card.FetchedAt = old.Codex, old.Plan, old.Gauges, old.FetchedAt
+			cards[i] = card
 			continue
 		}
 		sameBillingMonth := old.Billing != nil && old.Billing.Month == card.FetchedAt.UTC().Format("2006-01")
@@ -179,9 +190,6 @@ func (s *Store) retain(cards []Card) []Card {
 			// Snapshots handed to callers remain immutable.
 			card.Gauges, card.BalanceUSD, card.Billing, card.FetchedAt = old.Gauges, old.BalanceUSD, old.Billing, old.FetchedAt
 			card.Plan, card.AllowanceSource, card.ObservedAt = old.Plan, old.AllowanceSource, old.ObservedAt
-			if card.Key == "codex" {
-				card.Codex = old.Codex
-			}
 			cards[i] = card
 		}
 	}

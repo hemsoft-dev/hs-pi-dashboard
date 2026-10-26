@@ -118,11 +118,16 @@ same-account cached readings retain measured percentages but lose forecasts,
 Codex SUS and Fleet SUS. Credential source/account changes inhibit quota cache
 reuse; when no account identity exists, even a token change invalidates it.
 Successful unsupported responses replace the previous paid reading immediately.
+Same-identity request failures retain authenticated plan/window diagnostics even
+without quota gauges, keeping the original reading time and new refresh error.
+Unverified metadata is not retained as authenticated evidence.
 
 For synthetic local UI validation, run `node scripts/codex-fixture.cjs` and open
-the printed loopback URL with `?state=mismatch`, `?state=matching` or
-`?state=unknown`. The fixture serves the current embedded HTML/assets, labels
-the page synthetic, and supplies only invented snapshots. It never reads
+the printed loopback URL with `?state=mismatch`, `?state=matching`,
+`?state=unknown` or `?state=failed-free`. The last state uses the synthetic
+collector/cache contract fixture after an HTTP 401. The fixture serves the
+current embedded HTML/assets, labels the page synthetic, and supplies only
+invented snapshots. It never reads
 credentials or calls a provider.
 
 Claude reports subscription quotas from the read-only
