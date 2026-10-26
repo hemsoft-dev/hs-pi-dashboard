@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
+	"math/rand/v2"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -27,24 +29,26 @@ import (
 const (
 	museMinInterval = 5 * time.Minute
 	museMaxBackoff  = 30 * time.Minute
-	museFreshFor    = 7 * time.Minute // cache interval plus one agent poll and slack
-	museResetSlack  = time.Minute
+	museJitter      = 30 * time.Second // spreads agents that restart together
+	museFreshFor    = 7 * time.Minute  // cache interval plus one agent poll and slack
+	museClockSkew   = time.Minute      // tolerated provider clock lead over the agent
 )
 
 var (
 	musePlanText   = regexp.MustCompile(`^[A-Za-z0-9 ._()+-]{1,64}$`)
 	museSourceText = regexp.MustCompile(`^[a-z0-9_-]{1,32}$`)
-	museBucketText = regexp.MustCompile(`^[A-Za-z0-9_-]{1,40}$`)
+	museKeyText    = regexp.MustCompile(`^[A-Za-z0-9_-]{1,40}$`)
 )
 
-// museWindows are the vendor-documented windows. Undocumented keys still
-// become gauges, but without a duration they never get a forecast.
-var museWindows = map[string]struct {
-	label    string
-	duration time.Duration
+// museWindows are the five-hour and weekly windows in the vendor changelog
+// (https://dev.meta.ai/docs/muse-code/changelog, 1.4.13). The schemaVersion
+// pin is what guards these durations; the reset horizon only bounds them.
+var museWindows = []struct {
+	key, label string
+	duration   time.Duration
 }{
-	"window": {"5h", 5 * time.Hour},
-	"weekly": {"Weekly", 7 * 24 * time.Hour},
+	{"window", "5h", 5 * time.Hour},
+	{"weekly", "Weekly", 7 * 24 * time.Hour},
 }
 
 type museCache struct {
@@ -59,6 +63,7 @@ func (f *Fetcher) museCode(ctx context.Context) Card {
 	defer f.muse.mu.Unlock()
 	now := time.Now()
 	if f.muse.card != nil && now.Before(f.muse.next) {
+		// A cache hit keeps the original fetch and observation times.
 		return *f.muse.card
 	}
 	ctx, cancel := context.WithTimeout(ctx, fetchTimeout)
@@ -74,7 +79,7 @@ func (f *Fetcher) museCode(ctx context.Context) Card {
 	}
 	wait := museMinInterval
 	if err != nil {
-		card.Gauges, card.Plan, card.ObservedAt, card.AllowanceSource = nil, "", time.Time{}, ""
+		card.Gauges, card.Plan, card.AllowanceSource, card.ObservedAt, card.Warning = nil, "", "", time.Time{}, ""
 		card.Error = err.Error()
 		// Failures back off so a signed-out or broken CLI is not hammered.
 		f.muse.failures++
@@ -85,12 +90,13 @@ func (f *Fetcher) museCode(ctx context.Context) Card {
 	} else {
 		f.muse.failures = 0
 	}
-	f.muse.card, f.muse.next = &card, now.Add(wait)
+	f.muse.card, f.muse.next = &card, now.Add(wait+rand.N(museJitter))
 	return card
 }
 
-// parseMuseUsage fills card from the CLI's JSON. A nil error means at least
-// one valid window; every other outcome is an error with no gauges.
+// parseMuseUsage fills card from the CLI's JSON, collected at now. A nil
+// error means at least one valid documented window; every other outcome is an
+// error with no gauges.
 func parseMuseUsage(data []byte, card *Card, now time.Time) error {
 	var root struct {
 		SchemaVersion *int            `json:"schemaVersion"`
@@ -115,32 +121,36 @@ func parseMuseUsage(data []byte, card *Card, now time.Time) error {
 		return errors.New("allowance observation time missing")
 	}
 	asOf := time.UnixMilli(int64(asOfMs)).UTC()
-	keys := make([]string, 0, len(allowance))
-	for key := range allowance {
-		keys = append(keys, key)
+	if asOf.After(now.Add(museClockSkew)) {
+		return errors.New("allowance observation time is in the future")
 	}
-	// Documented windows first, then any others in a stable order.
-	sort.Slice(keys, func(i, j int) bool {
-		_, a := museWindows[keys[i]]
-		_, b := museWindows[keys[j]]
-		if a != b {
-			return a
-		}
-		if a && b {
-			return museWindows[keys[i]].duration < museWindows[keys[j]].duration
-		}
-		return keys[i] < keys[j]
-	})
 	var gauges []Gauge
-	for _, key := range keys {
-		if gauge, ok := museGauge(key, allowance[key], asOf, now); ok {
-			gauges = append(gauges, gauge)
+	var warnings []string
+	for _, spec := range museWindows {
+		raw, present := allowance[spec.key]
+		if !present {
+			continue
 		}
+		gauge, ok := museGauge(raw, asOf, now, spec.duration)
+		if !ok {
+			// A present window that fails validation is reported, never silent.
+			warnings = append(warnings, spec.label+" window invalid")
+			continue
+		}
+		gauge.BucketID, gauge.Label = spec.key, spec.label
+		gauges = append(gauges, gauge)
 	}
 	if len(gauges) == 0 {
 		return errors.New("allowance has no valid windows")
 	}
-	card.Gauges, card.ObservedAt = gauges, asOf
+	if extra := museUndocumentedWindows(allowance); len(extra) > 0 {
+		// Possibly model-scoped sub-limits; name them but do not pace on them.
+		warnings = append(warnings, "undocumented windows ignored: "+strings.Join(extra, ", "))
+	}
+	if age := now.Sub(asOf); age > museFreshFor {
+		warnings = append(warnings, fmt.Sprintf("observed %dm before collection", int(age.Minutes())))
+	}
+	card.Gauges, card.ObservedAt, card.Warning = gauges, asOf, strings.Join(warnings, "; ")
 	var tier, source string
 	if json.Unmarshal(allowance["tier"], &tier) == nil && musePlanText.MatchString(tier) {
 		card.Plan = tier
@@ -151,38 +161,55 @@ func parseMuseUsage(data []byte, card *Card, now time.Time) error {
 	return nil
 }
 
-func museGauge(key string, raw json.RawMessage, asOf, now time.Time) (Gauge, bool) {
+func museGauge(raw json.RawMessage, asOf, now time.Time, duration time.Duration) (Gauge, bool) {
 	var w struct {
 		ResetsAtMs  *float64 `json:"resetsAtMs"`
 		UsedPercent *float64 `json:"usedPercent"`
 	}
-	if !museBucketText.MatchString(key) || len(raw) == 0 || raw[0] != '{' || json.Unmarshal(raw, &w) != nil ||
+	if len(raw) == 0 || raw[0] != '{' || json.Unmarshal(raw, &w) != nil ||
 		w.ResetsAtMs == nil || !museEpochMs(*w.ResetsAtMs) || w.UsedPercent == nil || *w.UsedPercent < 0 {
 		return Gauge{}, false
 	}
 	reset := time.UnixMilli(int64(*w.ResetsAtMs)).UTC()
 	// A reset that already passed means the reading belongs to a rolled-over
-	// window; its percentage no longer describes the current one.
-	if !reset.After(asOf) || !reset.After(now) {
+	// window. A reset beyond the documented duration contradicts the contract.
+	if !reset.After(asOf) || !reset.After(now) || reset.Sub(asOf) > duration {
 		return Gauge{}, false
 	}
 	used := clamp(*w.UsedPercent, 0, 100)
-	gauge := Gauge{BucketID: key, Label: key, UsedPercent: &used, ResetAt: reset}
-	spec, known := museWindows[key]
-	if !known {
-		return gauge, true
-	}
-	if reset.Sub(asOf) > spec.duration+museResetSlack {
-		// A reset beyond the documented window contradicts the contract.
-		return Gauge{}, false
-	}
-	gauge.Label, gauge.WindowSeconds = spec.label, spec.duration.Seconds()
-	// Anchor the pace at the source observation, not at fetch time.
-	resetIn := min(reset.Sub(asOf).Seconds(), spec.duration.Seconds())
-	if p, ok := projectEndPercent(spec.label, *w.UsedPercent, resetIn, spec.duration.Seconds(), asOf, false); ok {
+	gauge := Gauge{UsedPercent: &used, ResetAt: reset, WindowSeconds: duration.Seconds()}
+	// Anchor the pace at the source observation, not at fetch time; the
+	// forecast keeps the raw over-limit value.
+	if p, ok := projectEndPercent("", *w.UsedPercent, reset.Sub(asOf).Seconds(), duration.Seconds(), asOf, false); ok {
 		gauge.ProjectedEnd = &p
 	}
 	return gauge, true
+}
+
+// museUndocumentedWindows lists allowance keys shaped like a window that the
+// contract does not define. Keys that fail the allowlist are counted, not named.
+func museUndocumentedWindows(allowance map[string]json.RawMessage) []string {
+	var names []string
+	unnamed := 0
+	for key, raw := range allowance {
+		if key == "window" || key == "weekly" {
+			continue
+		}
+		var w map[string]json.RawMessage
+		if json.Unmarshal(raw, &w) != nil || w["usedPercent"] == nil || w["resetsAtMs"] == nil {
+			continue
+		}
+		if museKeyText.MatchString(key) {
+			names = append(names, key)
+		} else {
+			unnamed++
+		}
+	}
+	sort.Strings(names)
+	if unnamed > 0 {
+		names = append(names, fmt.Sprintf("%d unnamed", unnamed))
+	}
+	return names
 }
 
 // museEpochMs accepts epoch milliseconds between 2001 and 2286.
@@ -190,6 +217,9 @@ func museEpochMs(v float64) bool { return v >= 1e12 && v < 1e13 }
 
 func (f *Fetcher) runMuseUsage(ctx context.Context) ([]byte, error) {
 	bin := envValue("HS_PI_DASHBOARD_MUSE_BIN")
+	if bin != "" && !filepath.IsAbs(bin) {
+		return nil, errors.New("HS_PI_DASHBOARD_MUSE_BIN must be an absolute path")
+	}
 	if bin == "" {
 		if path, err := exec.LookPath("muse"); err == nil {
 			bin = path
@@ -203,6 +233,11 @@ func (f *Fetcher) runMuseUsage(ctx context.Context) ([]byte, error) {
 	defer cancel()
 	cmd := exec.CommandContext(c, bin, "usage", "--json")
 	cmd.Env = museEnv(os.Environ())
+	// Run outside the agent's working directory so no project-local
+	// configuration applies.
+	if info, err := os.Stat(f.Home); err == nil && info.IsDir() {
+		cmd.Dir = f.Home
+	}
 	cmd.Stdin = nil
 	cmd.Stderr = io.Discard
 	cmd.WaitDelay = time.Second
@@ -222,7 +257,8 @@ func (f *Fetcher) runMuseUsage(ctx context.Context) ([]byte, error) {
 
 // museEnv measures the subscription session only: an exported META_API_KEY
 // would switch the CLI to pay-as-you-go. A background collector never signs
-// in or updates the CLI.
+// in or updates the CLI. Every copy of an overridden name is removed so the
+// appended values are the only ones.
 func museEnv(parent []string) []string {
 	env := make([]string, 0, len(parent)+2)
 	for _, kv := range parent {

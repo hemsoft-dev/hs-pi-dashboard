@@ -115,7 +115,8 @@ Muse Code reports its subscription allowance from `muse usage --json`
 with `META_API_KEY` removed (an exported key would switch to pay-as-you-go),
 `MUSE_LOGIN=0` and `MUSE_NO_AUTO_UPDATE=1`, so it never signs in or updates
 the CLI, and it reads no credential files. A reading is reused for five
-minutes; failures back off from 5 to 30 minutes. The short window and the
+minutes; failures back off from 5 to 30 minutes. A window that fails
+validation, an undocumented window or an old observation adds a warning. The short window and the
 weekly window become `5h` and `Weekly` rows with the tier as a note. A missing
 CLI, `allowance: null`, an unsupported schema or malformed output shows under
 **Not reporting**, never as zero. The CLI's free-form `reason` and `hint` text

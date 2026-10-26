@@ -1131,7 +1131,7 @@ function renderUsage(fleet) {
       const better = prev && c.key === "antigravity" && hasUsageData(prev) !== hasUsageData(c) ? hasUsageData(c) : !prev
         || (prev.error && !c.error)
         || ((!!prev.error === !!c.error)
-            && (Date.parse(c.fetchedAt) || 0) > (Date.parse(prev.fetchedAt) || 0));
+            && (Date.parse(readingAt(c)) || 0) > (Date.parse(readingAt(prev)) || 0));
       if (c.kind === "activity" && c.activity && prev?.activity) {
         const events = new Map();
         for (const event of [...(prev.activity.events || []),...(c.activity.events || [])]) {

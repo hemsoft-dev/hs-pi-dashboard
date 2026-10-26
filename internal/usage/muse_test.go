@@ -59,7 +59,7 @@ func TestMuseMeasuredAllowanceKeepsWindowsTierAndObservationTime(t *testing.T) {
 	if weekly.ProjectedEnd == nil || *weekly.ProjectedEnd < 46 || *weekly.ProjectedEnd > 48 {
 		t.Fatalf("weekly projection=%v", weekly.ProjectedEnd)
 	}
-	if card.Plan != "Muse Code Power Usage" || card.AllowanceSource != "mint" || !card.ObservedAt.Equal(museAsOf) {
+	if card.Plan != "Muse Code Power Usage" || card.AllowanceSource != "mint" || !card.ObservedAt.Equal(museAsOf) || card.Warning != "" {
 		t.Fatalf("metadata=%+v", card)
 	}
 	wire, _ := json.Marshal(card)
@@ -97,14 +97,14 @@ func TestMuseGenuineZeroAndExhaustedStayNumeric(t *testing.T) {
 	}
 }
 
-func TestMusePartialAndMalformedWindowsAreDroppedIndependently(t *testing.T) {
-	for _, name := range []string{"partial.json", "reset-beyond-window.json"} {
+func TestMusePartialAndMalformedWindowsAreDroppedIndependentlyAndReported(t *testing.T) {
+	for name, want := range map[string][2]string{
+		"partial.json":             {"Weekly", "5h window invalid"},
+		"reset-beyond-window.json": {"5h", "Weekly window invalid"},
+	} {
 		card, err := parseMuseFixture(t, name, museAsOf)
-		if err != nil || len(card.Gauges) != 1 {
+		if err != nil || len(card.Gauges) != 1 || card.Gauges[0].Label != want[0] || card.Warning != want[1] {
 			t.Fatal(name, card, err)
-		}
-		if name == "partial.json" && card.Gauges[0].Label != "Weekly" || name != "partial.json" && card.Gauges[0].Label != "5h" {
-			t.Fatal(name, card.Gauges)
 		}
 	}
 	if card, err := parseMuseFixture(t, "malformed-values.json", museAsOf); err == nil || len(card.Gauges) != 0 {
@@ -119,6 +119,17 @@ func TestMuseResetRolloverDropsTheExpiredWindow(t *testing.T) {
 		t.Fatal(card, err)
 	}
 	if card, err := parseMuseFixture(t, "measured.json", time.Date(2026, 11, 2, 0, 0, 1, 0, time.UTC)); err == nil || len(card.Gauges) != 0 {
+		t.Fatal(card, err)
+	}
+}
+
+func TestMuseObservationTimeIsBoundedByCollection(t *testing.T) {
+	if card, err := parseMuseFixture(t, "measured.json", museAsOf.Add(-2*time.Minute)); err == nil || len(card.Gauges) != 0 {
+		t.Fatal("future observation accepted", card)
+	}
+	// An old observation keeps its windows but says it is not current.
+	card, err := parseMuseFixture(t, "measured.json", museAsOf.Add(40*time.Minute))
+	if err != nil || len(card.Gauges) != 2 || card.Warning != "observed 40m before collection" {
 		t.Fatal(card, err)
 	}
 }
@@ -141,14 +152,17 @@ func TestMuseRejectsUnsupportedSchemaAndMalformedJSON(t *testing.T) {
 	}
 }
 
-func TestMuseExtraWindowsStayUnscopedAndTokensNeverBecomeQuota(t *testing.T) {
+func TestMuseUndocumentedWindowsAreNamedNotPacedAndTokensNeverBecomeQuota(t *testing.T) {
 	card, err := parseMuseFixture(t, "extra-window.json", museAsOf)
-	if err != nil || len(card.Gauges) != 2 {
+	if err != nil || len(card.Gauges) != 1 || card.Gauges[0].Label != "Weekly" {
 		t.Fatal(card, err)
 	}
-	extra := card.Gauges[1]
-	if extra.BucketID != "wonder-full-weekly" || extra.Label != "wonder-full-weekly" || extra.WindowSeconds != 0 || extra.ProjectedEnd != nil {
-		t.Fatalf("extra=%+v", extra)
+	if card.Warning != "undocumented windows ignored: wonder-full-weekly" {
+		t.Fatalf("warning=%q", card.Warning)
+	}
+	odd := `{"schemaVersion":1,"allowance":{"asOfMs":1793037245064,"weekly":{"resetsAtMs":1793577600000,"usedPercent":5},"<b>x</b>":{"resetsAtMs":1793577600000,"usedPercent":1}}}`
+	if err := parseMuseUsage([]byte(odd), &card, museAsOf); err != nil || card.Warning != "undocumented windows ignored: 1 unnamed" {
+		t.Fatal(card.Warning, err)
 	}
 	// Markup in the tier fails the allowlist instead of being echoed.
 	if card.Plan != "" {
@@ -188,7 +202,7 @@ func TestMuseCardCachesReadingsAndBacksOffFailures(t *testing.T) {
 	if ok.Error != "" || len(ok.Gauges) != 1 || f.muse.failures != 0 || ok.FreshForSeconds != museFreshFor.Seconds() {
 		t.Fatal(ok)
 	}
-	if got := time.Until(f.muse.next); got < 4*time.Minute || got > museMinInterval {
+	if got := time.Until(f.muse.next); got < 4*time.Minute || got > museMinInterval+museJitter {
 		t.Fatal("cache interval", got)
 	}
 	before := calls
@@ -210,6 +224,10 @@ func TestMuseMissingCLIIsActionableAndLaunchesNothing(t *testing.T) {
 	if _, err := f.runMuseUsage(context.Background()); err == nil || err.Error() != "muse CLI not installed" {
 		t.Fatal(err)
 	}
+	t.Setenv("HS_PI_DASHBOARD_MUSE_BIN", "muse")
+	if _, err := f.runMuseUsage(context.Background()); err == nil || !strings.Contains(err.Error(), "absolute") {
+		t.Fatal(err)
+	}
 }
 
 func TestMuseCommandRunsUsageWithoutPAYGKeyLoginOrUpdate(t *testing.T) {
@@ -220,7 +238,7 @@ func TestMuseCommandRunsUsageWithoutPAYGKeyLoginOrUpdate(t *testing.T) {
 	record := filepath.Join(dir, "record")
 	script := filepath.Join(dir, "muse")
 	body := "#!/bin/sh\n" +
-		`printf '%s|%s|%s|%s\n' "$*" "${META_API_KEY-unset}" "${MUSE_LOGIN-unset}" "${MUSE_NO_AUTO_UPDATE-unset}" > "` + record + "\"\n" +
+		`printf '%s|%s|%s|%s|%s\n' "$*" "${META_API_KEY-unset}" "${MUSE_LOGIN-unset}" "${MUSE_NO_AUTO_UPDATE-unset}" "$(pwd -P)" > "` + record + "\"\n" +
 		`echo '{"schemaVersion":1,"allowance":null}'` + "\n"
 	if err := os.WriteFile(script, []byte(body), 0700); err != nil {
 		t.Fatal(err)
@@ -233,7 +251,8 @@ func TestMuseCommandRunsUsageWithoutPAYGKeyLoginOrUpdate(t *testing.T) {
 		t.Fatal(string(out), err)
 	}
 	got, _ := os.ReadFile(record)
-	if strings.TrimSpace(string(got)) != "usage --json|unset|0|1" {
+	realDir, _ := filepath.EvalSymlinks(dir)
+	if strings.TrimSpace(string(got)) != "usage --json|unset|0|1|"+realDir {
 		t.Fatalf("invocation=%q", got)
 	}
 	failing := filepath.Join(dir, "failing")
