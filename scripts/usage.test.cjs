@@ -30,6 +30,11 @@ function gauge(usedPercent, projectedEnd = null, extra = {}) {
 }
 function card(overrides = {}) {
   const result = { key: 'codex', label: 'Codex', kind: 'quota', fetchedAt: new Date().toISOString(), gauges: [gauge(50, 125)], ...overrides };
+  if (result.key === 'codex') {
+    result.plan = overrides.plan ?? 'pro';
+    result.codex = overrides.codex === undefined ? {credentialSource:'pi',planSource:'usage-response',windows:['weekly']} : overrides.codex;
+  }
+  if (result.key === 'codex') result.gauges = result.gauges?.map(g=>({...g,windowSeconds:g.windowSeconds ?? (g.label === 'Weekly' ? 604800 : g.label === '5h' ? 18000 : undefined)}));
   // Existing generic card tests now model the canonical collector contract.
   if (result.key === 'antigravity') result.gauges = result.gauges?.map(g => {
     const id = g.bucketId ?? ({Weekly:'gemini-weekly','Gemini W':'gemini-weekly','Gemini 5h':'gemini-5h'}[g.label]);
@@ -127,7 +132,8 @@ test('the board leads with the most urgent provider and states it in the section
   assert.match(body.innerHTML, /<li class="urow s-risk ulead"><span class="uwin">Weekly/);
   assert.equal((body.innerHTML.match(/ulead/g) || []).length, 1);
   assert.match(body.innerHTML, /Prepaid balances.*Moonshot AI<\/span><span class="uamount">\$42.50/s);
-  assert.doesNotMatch(body.innerHTML, /ufail|unote/);
+  assert.doesNotMatch(body.innerHTML, /ufail|unote cached|unote warning/);
+  assert.match(body.innerHTML,/Pi · usage response/);
 
   r.renderUsage({ machines: [{ usage: { cards: [card({ gauges: [gauge(20, 40)] })] } }] });
   assert.match(summary.innerHTML, /uverdict s-ok">all plans on pace/);
@@ -153,26 +159,26 @@ test('failures collapse into one disclosure while cached and stale data stay lab
   assert.match(html, /<b>xAI<\/b> no usage source yet/);
   assert.match(html, /<b>Antigravity<\/b> refresh failed, showing cached values <code>\(timeout\)/);
   assert.match(html, /unote cached">refresh failed · cached 12m ago/);
-  assert.match(html, />Codex<\/span><span class="unote">stale · 12m ago/);
+  assert.match(html, />Codex<\/span>.*<span class="unote">stale · 12m ago/);
   assert.match(html, /\$37.88<\/span><span class="unote cached">refresh failed · cached just now/);
   assert.doesNotMatch(html, /<details class="ufail" open/);
   vm.runInContext('usageFailuresOpen = true', r);
   r.renderUsage({ machines: [{ usage: { cards: [card({ gauges: undefined, error: 'x' })] } }] });
   assert.match(body.innerHTML, /<details class="ufail" open>/);
-  assert.match(body.innerHTML, /no quota windows reported/);
+  assert.match(body.innerHTML, /Codex unavailable/);
 });
 
 test('account deduplication prefers healthy then fresh data and keeps collapse across refreshes', () => {
   const { r, body, storage } = renderer();
   const fleet = { machines: [
     { usage: { cards: [card({ error: 'offline', gauges: [gauge(100)] })] } },
-    { usage: { cards: [card({ gauges: [gauge(0)] })] } },
+    { usage: { cards: [card({ gauges: [gauge(0)], fetchedAt:new Date(Date.now()-60000).toISOString() })] } },
   ] };
   r.renderUsage(fleet);
   assert.equal((body.innerHTML.match(/class="ucard-label">Codex/g) || []).length, 1);
   assert.match(body.innerHTML, /0%<span class="ulbl"> used/);
   assert.doesNotMatch(body.innerHTML, /offline/);
-  fleet.machines.push({ usage: { cards: [card({ gauges: [gauge(100)], fetchedAt: new Date(Date.now() + 60000).toISOString() })] } });
+  fleet.machines.push({ usage: { cards: [card({ gauges: [gauge(100)], fetchedAt: new Date(Date.now()-1000).toISOString() })] } });
   storage.set('hs-pi-dashboard:card-collapsed:global:codex', '1');
   r.lastFleet = fleet;
   r.renderUsage(fleet);
@@ -241,7 +247,7 @@ test('verdicts without pace data keep their source and never claim on pace', () 
   const old = new Date(Date.now() - 20 * 60000).toISOString();
   const balance = card({ key: 'moonshot', label: 'Moonshot AI', kind: 'balance', gauges: undefined, balanceUsd: 5 });
   r.renderUsage({ machines: [{ usage: { cards: [card({ gauges: [gauge(null)], fetchedAt: old, error: 'timeout' }), balance] } }] });
-  assert.match(summary.innerHTML, /no quota readings<\/span>(?:<span class="usus[^"]*"[^>]*>[^<]*<\/span>)?<span class="usr">, <\/span><span class="ufresh cached">refresh failed · cached 20m ago/);
+  assert.match(summary.innerHTML, /Codex unavailable.*refresh failed · cached 20m ago/);
   r.renderUsage({ machines: [{ usage: { cards: [card({ gauges: [{ label: 'Weekly', usedPercent: 10 }] }), balance] } }] });
   assert.match(summary.innerHTML, /uverdict s-unknown">no forecasts yet<\/span>/);
   assert.doesNotMatch(summary.innerHTML, /on pace/);
@@ -256,7 +262,7 @@ test('an empty quota verdict is stamped from the quota cards, not a balance', ()
   const old = new Date(Date.now() - 20 * 60000).toISOString();
   const balance = card({ key: 'moonshot', label: 'Moonshot AI', kind: 'balance', gauges: undefined, balanceUsd: 5 });
   r.renderUsage({ machines: [{ usage: { cards: [card({ gauges: undefined, error: 'parse failed', fetchedAt: old }), balance] } }] });
-  assert.match(summary.innerHTML, /no quota readings<\/span>(?:<span class="usus[^"]*"[^>]*>[^<]*<\/span>)?<span class="usr">, <\/span><span class="ufresh cached">refresh failed · 20m ago<\/span>/);
+  assert.match(summary.innerHTML, /Codex unavailable.*refresh failed · 20m ago/);
   r.renderUsage({ machines: [{ usage: { cards: [card({ gauges: [], fetchedAt: old }), balance] } }] });
   assert.match(summary.innerHTML, /<span class="ufresh stale">stale · 20m ago<\/span>/);
   r.renderUsage({ machines: [{ usage: { cards: [balance] } }] });
@@ -369,7 +375,7 @@ test('healthy billing cannot hide failed or empty selected quota cards', () => {
   const quota=card({gauges:[],error});
   const billing={key:'github-billing:example-org',label:'GitHub',kind:'billing',fetchedAt:new Date().toISOString(),billing:{month:'2026-10',netUsd:0,products:[],budgets:[]}};
   r.renderUsage({machines:[{usage:{cards:[quota,billing]}}]});
-  assert.match(summary.innerHTML,/uverdict s-risk/);assert.match(summary.innerHTML,/Quota not reporting: Codex/);assert.match(summary.innerHTML,/refresh failed/);
+  assert.match(summary.innerHTML,/Codex unavailable/);assert.match(summary.innerHTML,/Fleet SUS n\/a/);if(error) assert.match(summary.innerHTML,/refresh failed/);
  }
 });
 
@@ -680,4 +686,204 @@ test('Muse Code reported by several agents is shown once, preferring a healthy r
   r.renderUsage({ machines: [{ usage: { cards: [failed] } }, { usage: { cards: [healthy] } }] });
   assert.equal((body.innerHTML.match(/class="ucard-label">Muse Code/g) || []).length, 1);
   assert.doesNotMatch(body.innerHTML, /refresh failed/);
+});
+
+// Codex account/plan evidence is synthetic, never a saved provider response.
+function codexMachine(name, overrides = {}, online = true) {
+  return {name,online,usage:{machine:name,cards:[card(overrides)]}};
+}
+test('Codex mismatch survives host order, health selection, staleness and collapse',()=>{
+  const weekly=codexMachine('Mini',{gauges:[gauge(9,63)]});
+  const free=codexMachine('Home',{plan:'free',codex:{credentialSource:'pi',planSource:'usage-response',windows:['30d']},gauges:[],
+    fetchedAt:new Date(Date.now()-86400000).toISOString(),error:'quota unavailable'},false);
+  for(const machines of [[weekly,free],[free,weekly]]) {
+    const {r,body,summary,storage}=renderer();
+    storage.set('hs-pi-dashboard:card-collapsed:global:codex','1');
+    r.renderUsage({machines});
+    assert.match(summary.innerHTML,/Codex account mismatch/);
+    assert.match(summary.innerHTML,/Fleet SUS n\/a/);
+    assert.doesNotMatch(summary.innerHTML,/all plans on pace|usus green/);
+    assert.match(body.innerHTML,/role="status".*Codex account mismatch/);
+    assert.match(body.innerHTML,/Home · free · Pi · 30-day unsupported · offline, stale, refresh failed/);
+    assert.match(body.innerHTML,/Mini · pro · Pi · weekly/);
+    assert.doesNotMatch(body.innerHTML,/ubar-used|ubar-fc|ubar-over|0% used|9% used|SUS \d/);
+    assert.match(body.innerHTML,/aria-expanded="false"/);
+  }
+});
+test('Codex provider plan conflicts and incompatible windows are independent',()=>{
+  for(const other of [
+    {plan:'plus'},
+    {plan:'prolite'},
+    {codex:{credentialSource:'cli',planSource:'usage-response',windows:['30d']},gauges:[]},
+    {codex:null,plan:undefined,gauges:[gauge(0,0,{label:'Monthly',windowSeconds:2592000})]},
+  ]) {
+    const {r,summary,body}=renderer();
+    r.renderUsage({machines:[codexMachine('Mini'),codexMachine('Home',other)]});
+    assert.match(summary.innerHTML,/account mismatch/);
+    assert.match(body.innerHTML,/account mismatch/);
+    assert.doesNotMatch(body.innerHTML,/ubar-used|ubar-fc|ubar-over/);
+  }
+});
+test('Codex matching reports accept partial windows and ignore token issue ages and source differences',()=>{
+  const {r,summary,body}=renderer();
+  const weekly=codexMachine('Mini',{gauges:[gauge(9,63)],codex:{credentialSource:'cli',planSource:'usage-response',windows:['weekly'],tokenIssuedAt:1}});
+  const both=codexMachine('Home',{gauges:[gauge(9,63),gauge(10,20,{label:'5h'})],
+    codex:{credentialSource:'pi',planSource:'usage-response',windows:['5h','weekly'],tokenIssuedAt:9999999999}});
+  r.renderUsage({machines:[weekly,both]});
+  assert.doesNotMatch(body.innerHTML,/account mismatch|unavailable/);
+  assert.match(body.innerHTML,/9%<span class="ulbl"> used/);
+  assert.match(summary.innerHTML,/all plans on pace/);
+  assert.match(summary.innerHTML,/Fleet SUS 63/);
+  // Disjoint short/weekly partial readings do not imply different accounts.
+  both.usage.cards[0].gauges=both.usage.cards[0].gauges.slice(1);
+  both.usage.cards[0].codex.windows=['5h'];
+  r.renderUsage({machines:[weekly,both]});
+  assert.doesNotMatch(body.innerHTML,/account mismatch/);
+});
+test('Codex missing, malformed, free, claim-only and unsupported plans stay unavailable',()=>{
+  for(const overrides of [
+    {codex:null},
+    {plan:'unknown'},
+    {plan:'free'},
+    {plan:{tier:'pro'}},
+    {plan:'pro',codex:{credentialSource:'pi',planSource:'jwt',windows:['weekly']}},
+    {plan:'future-monthly',gauges:[gauge(0,0,{label:'Monthly',windowSeconds:2592000})]},
+    {codex:{credentialSource:'pi',planSource:'usage-response',windows:['30d']},gauges:[]},
+    {gauges:[]},
+  ]) {
+    const {r,summary,body}=renderer();
+    r.renderUsage({machines:[codexMachine('Home',overrides)]});
+    assert.match(summary.innerHTML,/Codex unavailable/);
+    assert.match(summary.innerHTML,/Fleet SUS n\/a/);
+    assert.doesNotMatch(body.innerHTML,/ubar-used|ubar-fc|ubar-over|0% used|SUS \d/);
+    assert.doesNotMatch(summary.innerHTML,/all plans on pace/);
+    assert.match(body.innerHTML,/unavailable/);
+  }
+});
+test('Codex offline, stale and failed reports preserve measurements but remove forecasts and scores',()=>{
+  for(const [overrides,online] of [
+    [{},false],
+    [{fetchedAt:new Date(Date.now()-20*60000).toISOString()},true],
+    [{error:'HTTP 401'},true],
+  ]) {
+    const {r,body,summary}=renderer();
+    r.renderUsage({machines:[codexMachine('Home',{gauges:[gauge(9,63)],...overrides},online)]});
+    assert.match(summary.innerHTML,/Codex unavailable/);
+    assert.match(body.innerHTML,/9%<span class="ulbl"> used/);
+    assert.doesNotMatch(body.innerHTML,/ubar-fc|ubar-over|SUS \d/);
+    assert.match(summary.innerHTML,/Fleet SUS n\/a/);
+  }
+});
+test('Codex untrusted metadata cannot inject HTML or expose arbitrary plan/source text',()=>{
+  const {r,body,summary}=renderer();
+  const attack='<img src=x onerror=alert(1)>';
+  r.renderUsage({machines:[codexMachine(attack,{plan:attack,codex:{credentialSource:attack,planSource:'usage-response',windows:[attack]},gauges:[]})]});
+  assert.doesNotMatch(body.innerHTML,/<img/);
+  assert.doesNotMatch(summary.innerHTML,/<img/);
+  assert.match(body.innerHTML,/&lt;img src=x onerror=alert\(1\)&gt; · unknown · source unknown/);
+  assert.match(summary.innerHTML,/Codex unavailable/);
+  const reports=r.codexReports([{name:'h'.repeat(10000),usage:{cards:[card({codex:null})]}}]);
+  assert.ok(reports[0].context.length<180);
+});
+test('Codex legacy unavailability cannot leave a green Fleet SUS from other providers',()=>{
+  const {r,summary,body}=renderer();
+  r.setUsageProvider('claude',true);
+  const legacy=codexMachine('Home',{codex:null,gauges:[gauge(0,0,{label:'Monthly',windowSeconds:2592000})]});
+  legacy.usage.cards.push(card({key:'claude',label:'Claude',gauges:[scoredGauge(95)]}));
+  r.renderUsage({machines:[legacy]});
+  assert.match(summary.innerHTML,/Codex unavailable/);
+  assert.match(summary.innerHTML,/Fleet SUS n\/a/);
+  assert.match(body.innerHTML,/SUS 95/);
+  assert.doesNotMatch(body.innerHTML,/Monthly.*0%/);
+});
+test('disabled Codex removes its conflict notice and lets selected providers set the verdict',()=>{
+  const {r,summary,body}=renderer();
+  r.setUsageProvider('codex',false);
+  r.setUsageProvider('claude',true);
+  r.renderUsage({machines:[codexMachine('Mini'),codexMachine('Home',{plan:'free'}),
+    {usage:{cards:[card({key:'claude',label:'Claude',gauges:[scoredGauge(95)]})]}}]});
+  assert.doesNotMatch(body.innerHTML,/account mismatch|Codex unavailable/);
+  assert.match(summary.innerHTML,/Fleet SUS 95/);
+});
+test('Codex authenticated policy rejection is unavailable rather than refresh failure or cached zero',()=>{
+  const {r,summary,body}=renderer();
+  r.renderUsage({machines:[codexMachine('Home',{plan:'free',gauges:[],error:'codex quota unavailable: verified paid plan required',
+    codex:{credentialSource:'pi',planSource:'usage-response',windows:['30d']}})]});
+  assert.match(summary.innerHTML,/Codex unavailable/);
+  assert.doesNotMatch(summary.innerHTML+body.innerHTML,/refresh failed|Refresh failing|cached|0% used/);
+});
+test('Codex metadata gaps or stale same-plan reporters do not alone establish a mismatch',()=>{
+  const {r,body,summary}=renderer();
+  const healthy=codexMachine('Mini',{gauges:[gauge(9,63)]});
+  const legacy=codexMachine('Old agent',{codex:null,gauges:[gauge(40)],fetchedAt:new Date(Date.now()-86400000).toISOString()},false);
+  const stale=codexMachine('Home',{fetchedAt:new Date(Date.now()-86400000).toISOString()},false);
+  r.renderUsage({machines:[legacy,stale,healthy]});
+  assert.doesNotMatch(body.innerHTML,/account mismatch|Codex unavailable/);
+  assert.match(summary.innerHTML,/Fleet SUS 63/);
+});
+
+function codexDiagnosticMachines(mode) {
+  const unavailable=codexMachine('Home',{plan:'free',gauges:[],error:'codex quota unavailable: verified paid plan required',
+    codex:{credentialSource:'pi',planSource:'usage-response',windows:['30d']}});
+  return mode === 'mismatch' ? [unavailable,codexMachine('Mini',{gauges:[gauge(9,63)]})] : [unavailable];
+}
+for (const mode of ['unavailable','mismatch']) {
+  for (const [status,used,projected,phrase] of [
+    ['out',100,null,'limit reached'],
+    ['risk',50,125,'runs out in'],
+    ['tight',90,95,'near limit'],
+  ]) {
+    test(`Codex diagnostics preserve Claude ${status} severity and primary meaning with ${mode}`,()=>{
+      const {r,summary,body}=renderer();
+      r.setUsageProvider('claude',true);
+      const machines=codexDiagnosticMachines(mode);
+      machines[0].usage.cards.push(card({key:'claude',label:'Claude',gauges:[gauge(used,projected,{
+        windowSeconds:604800,resetAt:new Date(Date.now()+24*H).toISOString()})]}));
+      r.renderUsage({machines});
+      const expected=mode === 'mismatch' && status === 'tight' ? 'risk' : status;
+      assert.match(summary.innerHTML,new RegExp(`<span class="uverdict s-${expected}">Claude weekly ${phrase}`));
+      assert.match(summary.innerHTML,mode === 'mismatch' ? /Codex account mismatch/ : /Codex unavailable/);
+      assert.match(summary.innerHTML,/Fleet SUS n\/a/);
+      assert.match(body.innerHTML,new RegExp(`urow s-${status} ulead`));
+      assert.match(body.innerHTML,mode === 'mismatch' ? /Codex account mismatch/ : /Codex unavailable/);
+    });
+  }
+  test(`Codex diagnostics preserve billing risk severity and primary meaning with ${mode}`,()=>{
+    for (const alert of [{error:'billing access unavailable'},{billing:{month:new Date().toISOString().slice(0,7),attention:true,products:[],budgets:[]}}]) {
+      const {r,summary}=renderer();
+      const machines=codexDiagnosticMachines(mode);
+      machines[0].usage.cards.push({key:'github-billing:fixture',label:'GitHub',kind:'billing',fetchedAt:new Date().toISOString(),...alert});
+      r.renderUsage({machines});
+      assert.match(summary.innerHTML,/<span class="uverdict s-risk">GitHub (unavailable|attention)/);
+      assert.match(summary.innerHTML,mode === 'mismatch' ? /Codex account mismatch/ : /Codex unavailable/);
+      assert.match(summary.innerHTML,/Fleet SUS n\/a/);
+    }
+  });
+  test(`Codex diagnostics keep Codex-only ${mode} states explicit`,()=>{
+    const {r,summary}=renderer();
+    r.renderUsage({machines:codexDiagnosticMachines(mode)});
+    assert.match(summary.innerHTML,mode === 'mismatch'
+      ? /<span class="uverdict s-risk">Codex account mismatch/ : /<span class="uverdict s-unknown">Codex unavailable/);
+    assert.match(summary.innerHTML,/Fleet SUS n\/a/);
+    assert.doesNotMatch(summary.innerHTML,/all plans on pace/);
+  });
+}
+
+test('retained no-gauge Free diagnostic keeps mismatch and Fleet SUS unavailable after refresh failures',()=>{
+  // Go's mocked collector + real Store test verifies this exact serialized card.
+  const retained=JSON.parse(readFileSync(path.join(__dirname,'../internal/usage/testdata/codex/retained-free-30d.json'),'utf8'));
+  for (const error of [retained.error,'Codex request failed','HTTP 503']) {
+    for (const reverse of [false,true]) {
+      const {r,summary,body}=renderer();
+      const machines=[codexMachine('Mini',{gauges:[gauge(9,63)]}),
+        {name:'Home',online:true,usage:{cards:[{...retained,error}]}}];
+      if(reverse) machines.reverse();
+      r.renderUsage({machines});
+      assert.match(summary.innerHTML,/<span class="uverdict s-risk">Codex account mismatch/);
+      assert.match(summary.innerHTML,/Fleet SUS n\/a/);
+      assert.match(body.innerHTML,/Home · free · Pi · 30-day unsupported · stale, refresh failed/);
+      assert.doesNotMatch(body.innerHTML,/ubar-used|ubar-fc|ubar-over|0% used/);
+      assert.match(summary.innerHTML,/refresh failed/);
+    }
+  }
 });

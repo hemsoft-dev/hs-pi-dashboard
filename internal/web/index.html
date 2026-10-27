@@ -153,6 +153,7 @@
   .ufc { color: var(--muted); }
   .ufc b { color: var(--text); font-weight: 600; }
   .ufc .uphrase, .ureset, .unote, .ufresh, .umore, .ubals li > span { white-space: nowrap; }
+  .umore.codex-diagnostic { white-space: normal; }
   .ureset { color: var(--muted); }
   .s-tight .ufc b, .s-tight .uused { color: var(--gold); }
   .s-risk .ufc, .s-risk .ufc b, .s-out .ufc, .s-out .ufc b, .s-out .uused { color: var(--ember); }
@@ -192,6 +193,10 @@
   .uwin .usus { display: block; margin: 3px 0; }
   .uactivity { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: baseline; padding: 12px 14px; border-top: 1px solid var(--card-border); font-size: 12px; }
   .uactivity-scope { flex-basis: 100%; color: var(--muted); font-size: 11px; }
+  .ucodex-notice { padding: 12px 14px; border-bottom: 1px solid var(--card-border); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+  .ucodex-notice p { margin: 0 0 6px; }
+  .ucodex-notice b { color: #ffab91; }
+  .ucodex-notice ul { margin: 0; padding-left: 18px; color: var(--muted); }
   .uempty { padding: 12px 14px; color: var(--muted); font-size: 12px; }
   @media (max-width: 820px) {
     .ucols { display: none; }
@@ -478,6 +483,63 @@ function geminiCard(card) {
   });
   return {...card, kind:"quota", label:"Antigravity", gauges, balanceUsd:undefined};
 }
+// Compare all reporters before health/freshness selection. These tokens mirror
+// the collector allowlists; JWT claims and arbitrary host strings prove no plan.
+function codexEvidence(card) {
+  const meta = card.codex;
+  const source = ["pi","cli","none"].includes(meta?.credentialSource) ? meta.credentialSource : "unknown";
+  const plans = ["free","plus","pro","prolite","promax","team","business","enterprise","edu"];
+  const plan = meta?.planSource === "usage-response" && plans.includes(card.plan) ? card.plan : "unknown";
+  const shapes = new Set((Array.isArray(meta?.windows) ? meta.windows : []).filter(s=>["5h","weekly","30d","unsupported"].includes(s)));
+  for (const g of Array.isArray(card.gauges) ? card.gauges : []) {
+    if (g?.windowSeconds === 2592000 || g?.label === "Monthly") shapes.add("30d");
+    else if (g?.windowSeconds === 604800) shapes.add("weekly");
+    else if (g?.windowSeconds === 18000) shapes.add("5h");
+    else shapes.add("unsupported");
+  }
+  const paid = plan !== "free" && plan !== "unknown";
+  const verified = paid && ["pi","cli"].includes(source) && shapes.size > 0 && !shapes.has("30d") && !shapes.has("unsupported");
+  return {source,plan,shapes,verified};
+}
+function codexRequestError(card) {
+  // An authenticated response rejected by quota policy is unavailable data,
+  // not a failed refresh with an old cached reading.
+  return card.codex?.planSource === "usage-response" && /^codex quota unavailable:/i.test(card.error || "") ? "" : card.error;
+}
+function codexReports(machines) {
+  return machines.flatMap(m => (m.usage.cards || []).filter(c=>c.key === "codex").map(card => {
+    const evidence = codexEvidence(card);
+    const age = Date.now()-Date.parse(card.fetchedAt || "");
+    const state = [m.online === false ? "offline" : "", !Number.isFinite(age) || age<0 ? "age unknown" : age>USAGE_STALE_MS ? "stale" : "", codexRequestError(card) ? "refresh failed" : ""].filter(Boolean).join(", ");
+    const windows = [...evidence.shapes].sort().map(s=>({"5h":"5-hour",weekly:"weekly","30d":"30-day unsupported",unsupported:"unsupported window"})[s]).join(" + ") || "window unknown";
+    const host = String(m.machine || m.name || m.usage.machine || "unknown host").slice(0,80);
+    return {...evidence,card,context:`${host} · ${evidence.plan} · ${evidence.source === "pi" ? "Pi" : evidence.source === "cli" ? "Codex CLI" : "source unknown"} · ${windows}${state ? " · "+state : ""}`};
+  }));
+}
+function codexConflict(reports) {
+  const plans = new Set(reports.map(r=>r.plan).filter(p=>p!=="unknown"));
+  const families = new Set(reports.map(r=>r.shapes.has("30d") ? "30d" : r.shapes.has("unsupported") ? "unsupported"
+    : r.shapes.has("weekly") || r.shapes.has("5h") ? "standard" : "unknown").filter(s=>s!=="unknown"));
+  // A missing 5-hour window is a legitimate partial report, not a conflict.
+  return plans.size>1 || families.size>1;
+}
+function codexCard(card, mismatch = false, offline = false) {
+  if (card.key !== "codex") return card;
+  const evidence = codexEvidence(card);
+  const gauges = Array.isArray(card.gauges) ? card.gauges : [];
+  const valid = evidence.verified && gauges.length>0 && gauges.length<=2 && gauges.every(g=>
+    g && ((g.label === "Weekly" && g.windowSeconds === 604800) || (g.label === "5h" && g.windowSeconds === 18000)));
+  const unavailable = mismatch || !valid;
+  const age = Date.now()-Date.parse(card.fetchedAt || "");
+  const unforecast = offline || !!card.error || !Number.isFinite(age) || age<0 || age>USAGE_STALE_MS;
+  return {...card,label:"Codex",kind:"quota",plan:evidence.plan,error:codexRequestError(card),
+    warning:unavailable ? (mismatch ? "account mismatch" : "unavailable: verified paid plan and supported quota required")
+      : offline ? "offline reporter; cached reading" : card.warning,
+    gauges:unavailable ? [{label:"Quota",usedPercent:null,unavailable:true}]
+      : gauges.map(g=>({...g,usedPercent:Number.isFinite(g.usedPercent) && g.usedPercent>=0 && g.usedPercent<=100 ? g.usedPercent : null,
+        projectedEnd:unforecast || !Number.isFinite(g.usedPercent) || g.usedPercent<0 || g.usedPercent>100 ? null : g.projectedEnd})),
+    codexUnavailable:unavailable || unforecast || !gauges.some(g=>Number.isFinite(g?.usedPercent))};
+}
 // The forecast belongs to the moment the agent fetched it, so the run-out
 // instant is anchored there and cached readings keep counting down during an
 // outage instead of drifting with the shrinking reset horizon.
@@ -513,7 +575,7 @@ function windowState(g, provider, fetchedAt, cardError = "", providerKey = "", c
     } else status = used >= 85 || (projected ?? 0) >= 85 ? "tight" : "ok";
   }
   const result = { provider, bucketId:g.bucketId, unavailable:g.unavailable, raw: g.label, label: windowLabel(g.label), used, projected, remaining, status, runsOutMs, runsOutAt, fetchedAt, cardError, cardWarning,
-    attemptOnly:providerKey === "antigravity" && used == null };
+    attemptOnly:(providerKey === "antigravity" && used == null) || (providerKey === "codex" && !!g.unavailable) };
   result.susEligible = ["claude","codex","antigravity"].includes(providerKey || String(provider).toLowerCase())
     && windowName(g.label).period === "weekly"
     && ((providerKey || String(provider).toLowerCase()) === "antigravity" ? g.bucketId === "gemini-weekly" : String(g.label).toLowerCase() === "weekly");
@@ -542,6 +604,7 @@ function susMarkup(score,label="SUS",reason="Not enough weekly history or no quo
   return `<span class="usus ${band}" title="${esc(title)}">${esc(label)} ${score == null ? "n/a" : score}</span>`;
 }
 function fleetSubscriptionScore(groups) {
+  if (groups.some(g=>g.card.key === "codex" && g.card.codexUnavailable)) return null;
   const scored = groups.map(({card,windows}) => {
     const values = windows.filter(w=>card.key !== "antigravity" || w.bucketId === "gemini-weekly").map(w=>w.sus).filter(Number.isFinite);
     if (!values.length) return null;
@@ -598,6 +661,7 @@ function cardNote(card) {
   const at = readingAt(card);
   if (card.error && card.kind !== "activity" && (card.key !== "antigravity" || hasUsageData(card))) {
     const age = rel(at);
+    if (card.key === "codex" && !card.gauges?.some(g=>Number.isFinite(g.usedPercent))) return {text:"refresh failed · no reading",cls:"cached"};
     return { text: "refresh failed · cached" + (age === "—" ? "" : age === "now" ? " just now" : " " + age), cls: "cached" };
   }
   const fetched = Date.parse(at || "");
@@ -613,6 +677,7 @@ function readingAt(card) {
 function noteHtml(card) {
   const note = cardNote(card);
   return (card.plan ? `<span class="unote">${esc(card.plan)}</span>` : "")
+    + (card.key === "codex" ? `<span class="unote">${esc(codexEvidence(card).source === "pi" ? "Pi" : codexEvidence(card).source === "cli" ? "Codex CLI" : "source unknown")} · ${card.codex?.planSource === "usage-response" ? "usage response" : "plan unverified"}</span>` : "")
     + (card.warning ? `<span class="unote warning">${esc(card.warning)}</span>` : "")
     + (note ? `<span class="unote${note.cls ? " " + note.cls : ""}">${esc(note.text)}</span>` : "");
 }
@@ -1104,6 +1169,8 @@ function renderUsage(fleet) {
     return;
   }
   const machines = (fleet.machines ?? []).filter((m) => m.usage && m.usage.cards?.length);
+  const codexReporters = usageProviderEnabled("codex") ? codexReports(machines) : [];
+  const accountMismatch = codexConflict(codexReporters);
   if (!machines.length) {
     body.innerHTML = '<p class="uempty">no usage reporters online yet</p>';
     summary.textContent = "waiting for agents";
@@ -1124,11 +1191,13 @@ function renderUsage(fleet) {
         ? {...reported, billing: undefined, error: "GitHub billing awaiting current UTC month collection"}
         : reported;
       c = geminiCard(c);
+      c = codexCard(c, accountMismatch, m.online === false);
       if (c.kind === "activity" && m.online === false) {
         c = {...c,error:[c.error,"Includes activity from an offline agent"].filter(Boolean).join("; ")};
       }
       const prev = byKey.get(c.key);
-      const better = prev && c.key === "antigravity" && hasUsageData(prev) !== hasUsageData(c) ? hasUsageData(c) : !prev
+      const better = prev && c.key === "codex" && prev.codexUnavailable !== c.codexUnavailable ? !c.codexUnavailable
+        : prev && c.key === "antigravity" && hasUsageData(prev) !== hasUsageData(c) ? hasUsageData(c) : !prev
         || (prev.error && !c.error)
         || ((!!prev.error === !!c.error)
             && (Date.parse(readingAt(c)) || 0) > (Date.parse(readingAt(prev)) || 0));
@@ -1196,9 +1265,22 @@ function renderUsage(fleet) {
     }))];
   }
   // With no quota windows at all, the verdict is about the quota cards, never a balance's timestamp.
+  const codexUnavailable = cards.some(c=>c.key === "codex" && c.codexUnavailable);
+  if (accountMismatch || codexUnavailable) {
+    const diagnostic = accountMismatch ? "Codex account mismatch" : "Codex unavailable";
+    const diagnosticStatus = accountMismatch ? "risk" : "unknown";
+    const urgent = ["out","risk","tight"].includes(verdict.status);
+    // Keep actionable quota/billing meaning first; account diagnostics may
+    // raise the severity but must never lower an existing warning.
+    verdict = {text:urgent ? verdict.text : diagnostic,
+      status:urgent && USAGE_STATUS_RANK[verdict.status] > USAGE_STATUS_RANK[diagnosticStatus] ? verdict.status : diagnosticStatus,
+      more:[urgent ? diagnostic : "", accountMismatch ? "check reporting accounts" : "quota or freshness unverified", verdict.more].filter(Boolean).join(" · "),
+      source:[...(verdict.source || []), ...codexReporters.map(r=>({fetchedAt:r.card.fetchedAt,cardError:codexRequestError(r.card),
+        attemptOnly:accountMismatch || !r.verified || !r.card.gauges?.length}))]};
+  }
   const quotaAttempts = cards.filter((c) => c.kind === "quota").map((c) => ({ fetchedAt: c.fetchedAt, cardError: c.error, attemptOnly: true }));
   summary.innerHTML = `<span class="uverdict s-${verdict.status}">${esc(verdict.text)}`
-    + `${verdict.more ? ` <span class="umore"><span class="usep">· </span>${esc(verdict.more)}</span>` : ""}</span>`
+    + `${verdict.more ? ` <span class="umore${accountMismatch || codexUnavailable ? " codex-diagnostic" : ""}"><span class="usep">· </span>${esc(verdict.more)}</span>` : ""}</span>`
     + susMarkup(fleetSubscriptionScore(groups),"Fleet SUS")
     + `<span class="usr">, </span>${headerStamp([...(verdict.source ?? quotaAttempts), ...groups.flatMap(g=>g.windows).filter(w=>Number.isFinite(w.sus))], cards)}`;
 
@@ -1228,7 +1310,9 @@ function renderUsage(fleet) {
     return `<div class="uactivity"><span>${esc(c.label)}</span> <b>${c.activity.sourcesAvailable>0 ? events.length+" "+(events.length===1?"turn":"turns")+"/7d" : "activity unavailable"}</b> ${susMarkup(null)}
       <span class="uactivity-scope">${esc(c.activity.scope)} · reporting agents${c.error ? " · "+esc(c.error) : ""}</span>${noteHtml(c)}</div>`;
   }).join("");
-  body.innerHTML = `<div class="uboard">${board}${activityList}${balanceList}${billingCards.map(c => BillingDashboard.render(c)).join("")}${failures}</div>`;
+  const codexNotice = accountMismatch || codexUnavailable
+    ? `<div class="ucodex-notice" role="status"><p><b>Codex ${accountMismatch ? "account mismatch" : "unavailable"}</b>. Live quota, forecast and Fleet SUS unavailable. Check the reporting account in Pi or Codex CLI.</p><ul>${codexReporters.map(r=>`<li>${esc(r.context)}</li>`).join("")}</ul></div>` : "";
+  body.innerHTML = `<div class="uboard">${codexNotice}${board}${activityList}${balanceList}${billingCards.map(c => BillingDashboard.render(c)).join("")}${failures}</div>`;
   restoreFocus();
 }
 

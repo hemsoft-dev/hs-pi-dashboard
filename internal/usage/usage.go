@@ -50,21 +50,23 @@ type Gauge struct {
 
 // Card is one provider's dashboard card.
 type Card struct {
-	SubscriptionPriceUSD *float64  `json:"subscriptionPriceUsd"`
-	Activity             *Activity `json:"activity,omitempty"`
-	FreshForSeconds      float64   `json:"freshForSeconds,omitempty"`
-	Billing              *Billing  `json:"billing,omitempty"`
-	Key                  string    `json:"key"`
-	Label                string    `json:"label"`
-	Kind                 string    `json:"kind"`
-	BalanceUSD           *float64  `json:"balanceUsd,omitempty"`
-	Gauges               []Gauge   `json:"gauges,omitempty"`
-	Plan                 string    `json:"plan,omitempty"`            // provider-reported tier, allowlisted text
-	AllowanceSource      string    `json:"allowanceSource,omitempty"` // provider-reported source token
-	ObservedAt           time.Time `json:"observedAt,omitzero"`       // when the provider observed the reading
-	Warning              string    `json:"warning,omitempty"`
-	Error                string    `json:"error,omitempty"`
-	FetchedAt            time.Time `json:"fetchedAt"`
+	Codex                *CodexProvenance `json:"codex,omitempty"`
+	codexIdentity        [32]byte         // local cache boundary; never serialized
+	SubscriptionPriceUSD *float64         `json:"subscriptionPriceUsd"`
+	Activity             *Activity        `json:"activity,omitempty"`
+	FreshForSeconds      float64          `json:"freshForSeconds,omitempty"`
+	Billing              *Billing         `json:"billing,omitempty"`
+	Key                  string           `json:"key"`
+	Label                string           `json:"label"`
+	Kind                 string           `json:"kind"`
+	BalanceUSD           *float64         `json:"balanceUsd,omitempty"`
+	Gauges               []Gauge          `json:"gauges,omitempty"`
+	Plan                 string           `json:"plan,omitempty"`            // provider-reported tier, allowlisted text
+	AllowanceSource      string           `json:"allowanceSource,omitempty"` // provider-reported source token
+	ObservedAt           time.Time        `json:"observedAt,omitzero"`       // when the provider observed the reading
+	Warning              string           `json:"warning,omitempty"`
+	Error                string           `json:"error,omitempty"`
+	FetchedAt            time.Time        `json:"fetchedAt"`
 }
 
 // Snapshot is what the agent /usage endpoint returns.
@@ -157,8 +159,8 @@ func (s *Store) refresh(ctx context.Context) {
 	s.readyOnce.Do(func() { close(s.ready) })
 }
 
-// retain keeps each failed card's last good reading from the current
-// snapshot. Callers hold s.mu.
+// retain keeps each failed card's last reading or authenticated Codex
+// diagnostic from the current snapshot. Callers hold s.mu.
 func (s *Store) retain(cards []Card) []Card {
 	previous := make(map[string]Card, len(s.snapshot.Cards))
 	for _, card := range s.snapshot.Cards {
@@ -166,6 +168,22 @@ func (s *Store) retain(cards []Card) []Card {
 	}
 	for i, card := range cards {
 		old, ok := previous[card.Key]
+		if card.Key == "codex" {
+			if !ok || old.Kind != card.Kind || card.Error == "" ||
+				card.codexIdentity == [32]byte{} || card.codexIdentity != old.codexIdentity ||
+				card.Codex == nil || card.Codex.PlanSource != "" ||
+				old.Codex == nil || old.Codex.PlanSource != "usage-response" {
+				// Every new response replaces old evidence, even when unsupported.
+				// Failed requests retain only authenticated, same-identity evidence.
+				continue
+			}
+			// Rejected Free/unsupported responses have no gauges, but their plan
+			// and windows still diagnose account mismatch. Keep their original
+			// age independently of usable quota, and preserve the new error.
+			card.Codex, card.Plan, card.Gauges, card.FetchedAt = old.Codex, old.Plan, old.Gauges, old.FetchedAt
+			cards[i] = card
+			continue
+		}
 		sameBillingMonth := old.Billing != nil && old.Billing.Month == card.FetchedAt.UTC().Format("2006-01")
 		if card.Error != "" && len(card.Gauges) == 0 && card.BalanceUSD == nil && card.Billing == nil && ok && old.Kind == card.Kind && (len(old.Gauges) > 0 || old.BalanceUSD != nil || sameBillingMonth) {
 			// Keep the reading's original age, including through repeated failures.
@@ -251,121 +269,6 @@ func envValue(names ...string) string {
 		}
 	}
 	return ""
-}
-
-// --- Codex ------------------------------------------------------------------
-
-func (f *Fetcher) codex(ctx context.Context) Card {
-	card := Card{Key: "codex", Label: "Codex", Kind: KindQuota, FetchedAt: time.Now()}
-
-	token := f.authString("openai-codex", "access")
-	accountID := f.authString("openai-codex", "accountId")
-	if token == "" {
-		// Fall back to the Codex CLI's own session.
-		var saved struct {
-			Tokens struct {
-				AccessToken string `json:"access_token"`
-				AccountID   string `json:"account_id"`
-			} `json:"tokens"`
-		}
-		if f.readJSON(filepath.Join(f.Home, ".codex", "auth.json"), &saved) {
-			token = saved.Tokens.AccessToken
-			accountID = saved.Tokens.AccountID
-		}
-	}
-	if token == "" {
-		card.Error = "no session"
-		return card
-	}
-	if accountID == "" {
-		accountID = codexAccountIDFromJWT(token)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, codexUsageURL, nil)
-	if err != nil {
-		card.Error = err.Error()
-		return card
-	}
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("User-Agent", "hs-pi-dashboard/0.1")
-	if accountID != "" {
-		req.Header.Set("ChatGPT-Account-Id", accountID)
-	}
-
-	body, err := doRequest(f.Client, req)
-	if err != nil {
-		card.Error = err.Error()
-		return card
-	}
-
-	gauges, err := parseCodexWindows(body)
-	if err != nil {
-		card.Error = err.Error()
-		return card
-	}
-	card.Gauges = gauges
-	return card
-}
-
-// parseCodexWindows picks every window in rate_limit; labels derive from the
-// window duration (5h, Weekly, ...) because plans place them differently in
-// primary/secondary positions.
-func parseCodexWindows(body []byte) ([]Gauge, error) {
-	var root struct {
-		RateLimit map[string]json.RawMessage `json:"rate_limit"`
-	}
-	if err := json.Unmarshal(body, &root); err != nil {
-		return nil, fmt.Errorf("parse failed")
-	}
-	var gauges []Gauge
-	for _, name := range []string{"primary_window", "secondary_window"} {
-		raw, ok := root.RateLimit[name]
-		if !ok || strings.TrimSpace(string(raw)) == "" || string(raw) == "null" {
-			continue // plans may omit or null out a window
-		}
-		var w map[string]any
-		if json.Unmarshal(raw, &w) != nil {
-			continue
-		}
-		used, usedOK := toNumber(w["used_percent"])
-		resetAt, resetOK := toNumber(w["reset_at"])
-		duration, durationOK := toNumber(w["limit_window_seconds"])
-		if !durationOK || duration <= 0 || (!usedOK && !resetOK) {
-			continue
-		}
-		gauge := Gauge{Label: windowLabel(duration), WindowSeconds: duration}
-		if usedOK {
-			value := clamp(used, 0, 100)
-			gauge.UsedPercent = &value
-		}
-		if resetOK {
-			gauge.ResetAt = time.Unix(int64(resetAt), 0).UTC()
-			// Codex windows roll from the reset time, not a calendar boundary;
-			// projections use the raw percent so >100% readings stay truthful.
-			if p, ok := projectEndPercent(gauge.Label, used, time.Until(gauge.ResetAt).Seconds(), duration, time.Now(), false); usedOK && ok {
-				gauge.ProjectedEnd = &p
-			}
-		}
-		gauges = append(gauges, gauge)
-	}
-	if len(gauges) == 0 {
-		return nil, fmt.Errorf("no windows")
-	}
-	return gauges, nil
-}
-
-func windowLabel(durationSeconds float64) string {
-	switch {
-	case durationSeconds <= 6*3600:
-		return "5h"
-	case durationSeconds <= 8*86400:
-		return "Weekly"
-	case durationSeconds <= 31*86400:
-		return "Monthly"
-	default:
-		return "Window"
-	}
 }
 
 // antigravityClient returns the Antigravity CLI's OAuth client credentials —
