@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/HemSoft/hs-pi-dashboard/internal/herdr"
+	"github.com/HemSoft/hs-pi-dashboard/internal/pmd"
 	"github.com/HemSoft/hs-pi-dashboard/internal/projects"
 	"github.com/HemSoft/hs-pi-dashboard/internal/sessions"
 	"github.com/HemSoft/hs-pi-dashboard/internal/t3"
@@ -30,6 +31,9 @@ type Options struct {
 	ActiveWindow time.Duration // how long a quiet session still counts as active
 	UsagePoll    time.Duration // provider usage refresh interval (default 1m)
 	HerdrBinary  string        // installed Herdr executable; empty = discover it
+	PMDURL       string        // pmd base URL for T3 snapshot pushes; "" or "off" disables
+	PMDTokenFile string        // pmd ingest token file; missing turns the push off
+	PMDSources   []pmd.Source  // T3 databases to push; nil = the only one, as ""
 }
 
 // Run starts the agent HTTP server and blocks until it exits.
@@ -65,6 +69,7 @@ func Run(opts Options) error {
 	// Refresh provider usage in the background; the endpoint serves the cache.
 	// A fresh background context (not the request's) — the loop outlives requests.
 	go usageStore.Start(context.Background())
+	startPMDPush(opts)
 
 	srv := &http.Server{
 		Addr:              opts.Addr,
@@ -73,6 +78,21 @@ func Run(opts Options) error {
 	}
 	log.Printf("hs-pi-dashboard agent listening on %s (machine=%s dir=%s)", opts.Addr, opts.Machine, opts.Dir)
 	return srv.ListenAndServe()
+}
+
+// startPMDPush runs the pmd snapshot push beside the agent. pmd being down or
+// refusing pushes never affects the dashboard endpoints.
+func startPMDPush(opts Options) {
+	if opts.PMDURL == "" || opts.PMDURL == "off" {
+		log.Printf("pmd push off: -pmd-url is off")
+		return
+	}
+	sources, reason := pmd.Sources(opts.PMDSources, opts.T3DBs)
+	if len(sources) == 0 {
+		log.Print(reason)
+		return
+	}
+	go pmd.Run(context.Background(), pmd.Options{URL: opts.PMDURL, Machine: opts.Machine, TokenFile: opts.PMDTokenFile, Sources: sources})
 }
 
 func sessionHandler(opts Options) http.HandlerFunc {

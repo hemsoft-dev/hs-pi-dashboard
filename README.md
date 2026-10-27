@@ -370,6 +370,68 @@ Check each agent's `/sessions` source health and the dashboard's `/api/fleet` pa
 The dashboard can be opened in T3's browser panel as an ordinary page. Merge and
 fleet installation are separate from implementing this collector.
 
+## pmd T3 snapshot push
+
+The agent also pushes its T3 threads to project-manager's pmd, so the Chief's
+dispatch checks can ask pmd's `GET /v1/assignments` instead of scanning each
+machine over ssh ([#74](https://github.com/hemsoft-dev/hs-pi-dashboard/issues/74)).
+It posts a full snapshot to `POST <pmd>/v1/ingest/t3/<machine>` every 30 seconds,
+and sooner when the T3 database or its WAL changes, but never more often than once
+every 5 seconds. The body follows pmd's
+[ingest contract](https://github.com/hemsoft-dev/project-manager/blob/main/docs/design.md):
+every unarchived, undeleted thread (subagents included) with its project, branch,
+lineage, model, latest run, active/queued/settled state and known PRs, plus
+pending requests whose run hasn't finished. It is a port of project-manager's
+reference sender `scripts/t3/snapshot.py`. A fixture test compares the two
+field for field, and a pinned copy of the script lives in
+`internal/t3/testdata/ingest`. The database is read in one read-only transaction.
+No prompts, messages or tool payloads are sent. Question text isn't in the
+database, so `questions` is always `[]`.
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `-pmd-url` | `http://100.97.164.73:8790` | pmd base URL; `off` disables the push |
+| `-pmd-token-file` | `~/.config/hs-pi-dashboard/pmd-token` | bearer token, one line; missing turns the push off |
+| `-pmd-t3 env=path` | the only T3 database, as `""` | push this database as environment `env`; repeat for several installs |
+
+With no `-pmd-t3`, the agent pushes its only T3 database (the default
+`~/.t3/userdata/statev2.sqlite`, or the one `-t3-db`) as environment `""`. With
+several `-t3-db` and no `-pmd-t3`, it pushes nothing and logs why. Air runs two
+installs:
+
+```bash
+./hs-pi-dashboard agent ... \
+  -pmd-t3 server=$HOME/.t3-server/userdata/statev2.sqlite \
+  -pmd-t3 desktop=$HOME/.t3/userdata/statev2.sqlite
+```
+
+Each machine has its own token, named `hs-pi@<machine>` with scope `ingest:t3`.
+It may post only to its own machine's path. `pmd token add` prints only the
+token on stdout, so on mini it can go straight into a private file:
+
+```bash
+mkdir -p ~/.config/hs-pi-dashboard
+(umask 077; pmd token add hs-pi@mini --scopes ingest:t3 > ~/.config/hs-pi-dashboard/pmd-token)
+```
+
+For another machine, write that machine's token the same way and pipe it over
+ssh into the same path under the agent's user, without echoing it.
+
+On Windows the file is `C:\Users\<user>\.config\hs-pi-dashboard\pmd-token`.
+Restrict it to the agent's user with `icacls` (macOS and Linux need mode 600, or the
+push stays off). The token is read before every push, so adding or rotating it needs no
+restart, and it is never logged.
+
+The push runs beside the dashboard agent and never blocks it. Logs show one
+line per state change: push on or off, first success, each distinct failure.
+Network errors and `5xx` are retried on the next tick, and `409 stale_snapshot`
+is dropped (the next snapshot heals it). A `400` or `413` waits until the
+snapshot changes. Any other `4xx` (`403 wrong_machine`, `404 unknown_machine`,
+a revoked token) waits until the token file changes. Either kind of hold
+retries once after 15 minutes, so a fix on pmd's side heals.
+`HS_PI_INGEST_LIVE_DB=<statev2.sqlite> go test ./internal/t3 -run LiveDatabase`
+compares both senders on a real database.
+
 ## Subscription utilization
 
 Weekly rows show Sub Utilization Score (SUS), from 0 to 100, next to their
