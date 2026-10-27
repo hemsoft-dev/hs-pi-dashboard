@@ -1,0 +1,250 @@
+{
+ "environment": "",
+ "threads": [
+  {
+   "threadId": "t-live",
+   "title": "Live run ✓ «quoted»",
+   "project": "gh-x",
+   "branch": "feat/live",
+   "creationSource": "user",
+   "root": null,
+   "parent": null,
+   "model": "gpt-6.1-sol",
+   "updatedAt": "2026-10-26T12:00:00.000Z",
+   "latestRun": {
+    "status": "running",
+    "at": "2026-10-26T11:59:00.000Z"
+   },
+   "active": true,
+   "queued": false,
+   "settled": false,
+   "prs": [
+    {
+     "repo": "hemsoft-dev/gh-x",
+     "number": 12,
+     "state": "open",
+     "watch": true
+    },
+    {
+     "repo": "hemsoft-dev/gh-x",
+     "number": 13,
+     "state": null,
+     "watch": false
+    },
+    {
+     "repo": "hemsoft-dev/gh-x",
+     "number": 12,
+     "state": "open",
+     "watch": false
+    }
+   ]
+  },
+  {
+   "threadId": "t-live/root/agent-1",
+   "title": "/root/ reviewer",
+   "project": "gh-x",
+   "branch": null,
+   "creationSource": null,
+   "root": "t-live",
+   "parent": "t-live",
+   "model": "gpt-6.1-sol",
+   "updatedAt": "2026-10-26T10:06:00.000Z",
+   "latestRun": {
+    "status": "starting",
+    "at": "2026-10-26T10:05:00.000Z"
+   },
+   "active": true,
+   "queued": false,
+   "settled": false,
+   "prs": []
+  },
+  {
+   "threadId": "t-no-project",
+   "title": "Project removed",
+   "project": "",
+   "branch": null,
+   "creationSource": null,
+   "root": null,
+   "parent": null,
+   "model": null,
+   "updatedAt": "2026-10-26T06:00:00.000Z",
+   "latestRun": null,
+   "active": false,
+   "queued": false,
+   "settled": false,
+   "prs": []
+  },
+  {
+   "threadId": "t-queued-completed",
+   "title": "Queued behind completed",
+   "project": "gh-x",
+   "branch": null,
+   "creationSource": null,
+   "root": null,
+   "parent": null,
+   "model": "claude-opus-5-5",
+   "updatedAt": "2026-10-26T11:30:00.000Z",
+   "latestRun": {
+    "status": "queued",
+    "at": "2026-10-26T11:30:00.000Z"
+   },
+   "active": false,
+   "queued": true,
+   "settled": false,
+   "prs": []
+  },
+  {
+   "threadId": "t-queued-failed",
+   "title": "Queued behind failed",
+   "project": "chief",
+   "branch": null,
+   "creationSource": null,
+   "root": null,
+   "parent": null,
+   "model": null,
+   "updatedAt": "2026-10-26T11:31:00.000Z",
+   "latestRun": {
+    "status": "queued",
+    "at": "2026-10-26T11:31:00.000Z"
+   },
+   "active": false,
+   "queued": true,
+   "settled": false,
+   "prs": []
+  },
+  {
+   "threadId": "t-settled",
+   "title": "Settled",
+   "project": "chief",
+   "branch": null,
+   "creationSource": null,
+   "root": null,
+   "parent": null,
+   "model": null,
+   "updatedAt": "2026-10-25T09:00:00.000Z",
+   "latestRun": {
+    "status": "completed",
+    "at": "2026-10-25T09:00:00.000Z"
+   },
+   "active": false,
+   "queued": false,
+   "settled": true,
+   "prs": []
+  },
+  {
+   "threadId": "t-settled-early",
+   "title": "Settled before the latest run",
+   "project": "chief",
+   "branch": null,
+   "creationSource": null,
+   "root": null,
+   "parent": null,
+   "model": null,
+   "updatedAt": "2026-10-25T10:00:00.000Z",
+   "latestRun": {
+    "status": "interrupted",
+    "at": "2026-10-25T10:00:00.000Z"
+   },
+   "active": false,
+   "queued": false,
+   "settled": false,
+   "prs": []
+  },
+  {
+   "threadId": "t-settled-norun",
+   "title": "Settled without runs",
+   "project": "chief",
+   "branch": null,
+   "creationSource": null,
+   "root": null,
+   "parent": null,
+   "model": null,
+   "updatedAt": "2026-10-25T08:00:00.000Z",
+   "latestRun": null,
+   "active": false,
+   "queued": false,
+   "settled": false,
+   "prs": []
+  },
+  {
+   "threadId": "t-stale-queued",
+   "title": "Stale queued run",
+   "project": "chief",
+   "branch": null,
+   "creationSource": "mcp",
+   "root": null,
+   "parent": null,
+   "model": null,
+   "updatedAt": "2026-10-26T08:30:00.000Z",
+   "latestRun": {
+    "status": "completed",
+    "at": "2026-10-26T08:30:00.000Z"
+   },
+   "active": false,
+   "queued": false,
+   "settled": false,
+   "prs": []
+  },
+  {
+   "threadId": "t-watch",
+   "title": "PR watch",
+   "project": "gh-x",
+   "branch": null,
+   "creationSource": null,
+   "root": null,
+   "parent": null,
+   "model": null,
+   "updatedAt": "2026-10-26T07:10:00.000Z",
+   "latestRun": {
+    "status": "completed",
+    "at": "2026-10-26T07:10:00.000Z"
+   },
+   "active": false,
+   "queued": false,
+   "settled": false,
+   "prs": [
+    {
+     "repo": "hemsoft-dev/gh-x",
+     "number": 20,
+     "state": "merged",
+     "watch": true
+    },
+    {
+     "repo": "hemsoft-dev/gh-x",
+     "number": 21,
+     "state": null,
+     "watch": false
+    },
+    {
+     "repo": "hemsoft-dev/gh-x",
+     "number": 22,
+     "state": "closed",
+     "watch": false
+    }
+   ]
+  }
+ ],
+ "pending": [
+  {
+   "threadId": "t-watch",
+   "requestId": "request:no-ordinal",
+   "kind": "user_input",
+   "createdAt": "2026-10-26T07:20:00.000Z",
+   "questions": []
+  },
+  {
+   "threadId": "t-queued-completed",
+   "requestId": "request:ordinal%25253A7",
+   "kind": "approval",
+   "createdAt": "2026-10-26T11:31:00.000Z",
+   "questions": []
+  },
+  {
+   "threadId": "t-live",
+   "requestId": "request:thread%3At-live%3Aordinal%3A1%3Aq1",
+   "kind": "user_input",
+   "createdAt": "2026-10-26T11:59:30.000Z",
+   "questions": []
+  }
+ ]
+}

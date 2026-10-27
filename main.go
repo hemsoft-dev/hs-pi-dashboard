@@ -16,6 +16,7 @@ import (
 
 	"github.com/HemSoft/hs-pi-dashboard/internal/agent"
 	"github.com/HemSoft/hs-pi-dashboard/internal/fleet"
+	"github.com/HemSoft/hs-pi-dashboard/internal/pmd"
 	"github.com/HemSoft/hs-pi-dashboard/internal/projects"
 )
 
@@ -77,6 +78,12 @@ Agent flags:
   -project-path string local checkout; repeat for multiple, off disables
   -projects-poll dur   project refresh interval (default 30m, minimum 15m)
   -herdr-bin string     installed Herdr executable (default auto-discover)
+  -pmd-url string       pmd base URL for T3 snapshot pushes
+                        (default http://100.97.164.73:8790; "off" disables)
+  -pmd-token-file path  pmd ingest token, mode 600
+                        (default ~/.config/hs-pi-dashboard/pmd-token; missing = no push)
+  -pmd-t3 env=path      T3 database to push as environment env; repeat for
+                        several installs (default: the only T3 database, as "")
 
 Serve flags:
   -addr string          listen address (default ":8788"; bind the Tailscale IP
@@ -103,6 +110,16 @@ func runAgent(args []string) error {
 	machine := fs.String("machine", "", "label reported in the snapshot (default hostname)")
 	window := fs.Duration("active-window", 2*time.Minute, "how long a quiet session counts as active")
 	herdrBin := fs.String("herdr-bin", "", "installed Herdr executable (default auto-discover)")
+	pmdURL := fs.String("pmd-url", pmd.DefaultURL, `pmd base URL for T3 snapshot pushes; "off" disables`)
+	pmdToken := fs.String("pmd-token-file", pmd.DefaultTokenFile(), "pmd ingest token file, mode 600; missing turns the push off")
+	var pmdSources []pmd.Source
+	fs.Func("pmd-t3", "T3 database to push as env=path; repeat for several installs", func(value string) error {
+		src, err := pmd.ParseSource(value)
+		if err == nil {
+			pmdSources = append(pmdSources, src)
+		}
+		return err
+	})
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -125,6 +142,9 @@ func runAgent(args []string) error {
 		HerdrBinary:  *herdrBin,
 		ProjectPaths: projectPaths,
 		ProjectsPoll: *projectsPoll,
+		PMDURL:       *pmdURL,
+		PMDTokenFile: *pmdToken,
+		PMDSources:   pmdSources,
 	})
 }
 
