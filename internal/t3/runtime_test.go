@@ -520,7 +520,7 @@ func TestPairingUsesServerCLIAndRechecksScopeWhenItChanges(t *testing.T) {
 func TestColdPairingWithinCollectionBudget(t *testing.T) {
 	_, c, _ := fixture(t)
 	f, _ := attachRuntime(t, c)
-	f.threads = []liveThread{{ID: "cold", Title: "Cold Windows pairing", Status: "running"}}
+	f.threads = []liveThread{{ID: "cold", Title: "Cold Windows pairing", Session: &liveSession{Status: "running"}}}
 	run := c.runtime.run
 	c.runtime.run = func(ctx context.Context, binary string, args ...string) ([]byte, error) {
 		if reflect.DeepEqual(args, []string{"auth", "pairing", "create", "--help"}) {
