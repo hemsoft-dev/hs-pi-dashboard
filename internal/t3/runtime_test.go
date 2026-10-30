@@ -516,3 +516,24 @@ func TestPairingUsesServerCLIAndRechecksScopeWhenItChanges(t *testing.T) {
 		t.Fatalf("used=%v scopedFor=%q grants=%d", used, c.runtime.scopedFor, f.grants)
 	}
 }
+
+func TestColdPairingWithinCollectionBudget(t *testing.T) {
+	_, c, _ := fixture(t)
+	f, _ := attachRuntime(t, c)
+	f.threads = []liveThread{{ID: "cold", Title: "Cold Windows pairing", Status: "running"}}
+	run := c.runtime.run
+	c.runtime.run = func(ctx context.Context, binary string, args ...string) ([]byte, error) {
+		if reflect.DeepEqual(args, []string{"auth", "pairing", "create", "--help"}) {
+			select {
+			case <-time.After(3 * time.Second):
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+		return run(ctx, binary, args...)
+	}
+	got := c.Poll()
+	if len(got.Sessions) != 1 || !got.Sessions[0].Active {
+		t.Fatalf("cold pairing lost live thread: %+v", got)
+	}
+}

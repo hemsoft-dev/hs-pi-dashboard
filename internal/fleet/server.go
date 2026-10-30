@@ -169,7 +169,8 @@ func (s *Server) poll(ctx context.Context) {
 func (s *Server) fetch(ctx context.Context, t Target) MachineState {
 	state := MachineState{Name: t.Name, URL: t.URL}
 
-	reqCtx, cancel := context.WithTimeout(ctx, s.timeout)
+	// Session collection includes cold native T3 CLI pairing on Windows.
+	reqCtx, cancel := context.WithTimeout(ctx, max(s.timeout, 35*time.Second))
 	defer cancel()
 	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, strings.TrimRight(t.URL, "/")+"/sessions", nil)
 	if err != nil {

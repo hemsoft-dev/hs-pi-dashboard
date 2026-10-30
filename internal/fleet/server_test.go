@@ -239,3 +239,20 @@ func TestFleetCarriesMuseAllowanceFieldsAlongsideOldAgents(t *testing.T) {
 		t.Fatalf("old agent=%v", old)
 	}
 }
+
+// Windows pairing alone can exceed the former three-second HTTP limit.
+func TestColdSessionCollectionRemainsOnline(t *testing.T) {
+	agent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-time.After(3100 * time.Millisecond):
+			_ = json.NewEncoder(w).Encode(sessions.Snapshot{Machine: "laptop", Sessions: []sessions.Summary{{ID: "cold-thread", Active: true}}})
+		case <-r.Context().Done():
+		}
+	}))
+	defer agent.Close()
+	server := NewServer(nil, time.Second)
+	got := server.fetch(context.Background(), Target{Name: "laptop", URL: agent.URL})
+	if !got.Online || len(got.Sessions) != 1 || got.Sessions[0].ID != "cold-thread" {
+		t.Fatalf("cold collection lost: %+v", got)
+	}
+}
