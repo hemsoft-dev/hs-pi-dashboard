@@ -7,8 +7,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/HemSoft/hs-pi-dashboard/internal/backgroundcmd"
 	"github.com/HemSoft/hs-pi-dashboard/internal/githubcli"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -234,7 +234,7 @@ func (b *limitedBuffer) Write(p []byte) (int, error) {
 	return b.buffer.Write(p)
 }
 func runStatus(ctx context.Context, path string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, githubcli.Binary(), "x", "status", "--json")
+	cmd := backgroundcmd.CommandContext(ctx, githubcli.Binary(), "x", "status", "--json")
 	cmd.Dir = path
 	cmd.WaitDelay = time.Second
 	var out limitedBuffer

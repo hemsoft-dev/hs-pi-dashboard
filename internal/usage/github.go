@@ -7,11 +7,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/HemSoft/hs-pi-dashboard/internal/backgroundcmd"
 	"github.com/HemSoft/hs-pi-dashboard/internal/githubcli"
 	"io"
 	"math"
 	"net/http"
-	"os/exec"
 	"regexp"
 	"sort"
 	"strconv"
@@ -217,7 +217,7 @@ func (b *billingBuffer) Write(p []byte) (int, error) {
 	return b.Buffer.Write(p)
 }
 func runGitHubBilling(ctx context.Context, path string) (billingResponse, error) {
-	cmd := exec.CommandContext(ctx, githubcli.Binary(), "api", "--hostname", "github.com", "--method", "GET", "--include", path, "-H", "Accept: application/vnd.github+json", "-H", "X-GitHub-Api-Version: 2026-03-10")
+	cmd := backgroundcmd.CommandContext(ctx, githubcli.Binary(), "api", "--hostname", "github.com", "--method", "GET", "--include", path, "-H", "Accept: application/vnd.github+json", "-H", "X-GitHub-Api-Version: 2026-03-10")
 	cmd.WaitDelay = time.Second
 	var out billingBuffer
 	cmd.Stdout = &out

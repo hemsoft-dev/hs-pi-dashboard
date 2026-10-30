@@ -1,9 +1,10 @@
 package usage
 
-import "os/exec"
+import (
+	"github.com/HemSoft/hs-pi-dashboard/internal/backgroundcmd"
+	"os/exec"
+)
 
 func credentialCommand(script string) *exec.Cmd {
-	cmd := exec.Command("powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script)
-	hideCredentialWindow(cmd)
-	return cmd
+	return backgroundcmd.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script)
 }

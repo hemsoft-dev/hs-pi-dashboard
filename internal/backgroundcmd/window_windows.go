@@ -1,10 +1,10 @@
-package usage
+package backgroundcmd
 
 import (
 	"os/exec"
 	"syscall"
 )
 
-func hideCredentialWindow(cmd *exec.Cmd) {
+func hideWindow(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000}
 }
