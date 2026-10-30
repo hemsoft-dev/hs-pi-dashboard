@@ -18,7 +18,6 @@ import (
 	"math"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -746,7 +745,7 @@ $bytes = New-Object byte[] $cred.CredentialBlobSize
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
 [Console]::Out.Write([Text.Encoding]::UTF8.GetString($bytes))
 `
-	out, err := exec.Command("powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script).Output()
+	out, err := credentialCommand(script).Output()
 	if err != nil {
 		return ""
 	}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/HemSoft/hs-pi-dashboard/internal/backgroundcmd"
 	"io"
 	"io/fs"
 	"math/rand/v2"
@@ -238,7 +239,7 @@ func (f *Fetcher) runMuseUsage(ctx context.Context) ([]byte, error) {
 	}
 	c, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(c, bin, "usage", "--json")
+	cmd := backgroundcmd.CommandContext(c, bin, "usage", "--json")
 	cmd.Env = museEnv(os.Environ())
 	// Run outside the agent's working directory so no project-local
 	// configuration applies.

@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/HemSoft/hs-pi-dashboard/internal/backgroundcmd"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -61,7 +62,7 @@ func New(binary string) *Collector {
 			if binary == "" {
 				return nil, errors.New("herdr is not installed")
 			}
-			cmd := exec.CommandContext(ctx, binary, args...)
+			cmd := backgroundcmd.CommandContext(ctx, binary, args...)
 			cmd.Env = withoutCallerContext(os.Environ())
 			cmd.WaitDelay = 250 * time.Millisecond
 			var out limitedBuffer

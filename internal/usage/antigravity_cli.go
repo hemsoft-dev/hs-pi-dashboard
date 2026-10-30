@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/HemSoft/hs-pi-dashboard/internal/backgroundcmd"
 	"io"
 	"os"
 	"os/exec"
@@ -79,7 +80,7 @@ func (f *Fetcher) runAntigravityUsage(ctx context.Context) ([]byte, error) {
 	}
 	c, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(c, bin, "-p", "/usage", "--output-format", "json")
+	cmd := backgroundcmd.CommandContext(c, bin, "-p", "/usage", "--output-format", "json")
 	cmd.Stderr = io.Discard
 	cmd.WaitDelay = time.Second
 	var out usageCommandBuffer
