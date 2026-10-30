@@ -239,3 +239,31 @@ func TestFleetCarriesMuseAllowanceFieldsAlongsideOldAgents(t *testing.T) {
 		t.Fatalf("old agent=%v", old)
 	}
 }
+
+// A hung agent must retain the configured short deadline. In particular a
+// source-specific cold CLI allowance must not become a blanket HTTP minimum.
+func TestHungAgentKeepsShortDeadlineAndHealthyTargetRefreshes(t *testing.T) {
+	hung := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { <-r.Context().Done() }))
+	defer hung.Close()
+	healthy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/sessions":
+			_ = json.NewEncoder(w).Encode(sessions.Snapshot{Machine: "healthy", Sessions: []sessions.Summary{{ID: "live"}}})
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer healthy.Close()
+	server := NewServer([]Target{{Name: "hung", URL: hung.URL}, {Name: "healthy", URL: healthy.URL}}, time.Second)
+	server.timeout = 20 * time.Millisecond
+	before := time.Now()
+	for range 2 {
+		server.poll(context.Background())
+	}
+	if time.Since(before) > time.Second {
+		t.Fatal("hung agent overrode configured fleet timeout")
+	}
+	if server.cache["hung"].Online || !server.cache["healthy"].Online || len(server.cache["healthy"].Sessions) != 1 {
+		t.Fatalf("healthy target did not refresh: %+v", server.cache)
+	}
+}
