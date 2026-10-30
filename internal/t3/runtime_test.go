@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -98,6 +99,12 @@ func attachRuntime(t *testing.T, c *Collector) (*runtimeFixture, *httptest.Serve
 		return []byte(`{"credential":"one-time-secret"}`), nil
 	}
 	c.runtime = r
+	t.Cleanup(func() {
+		if r.pairing != nil {
+			r.pairing.cancel()
+			<-r.pairing.done
+		}
+	})
 	writeRuntime(t, r.path, server.URL, 1)
 	return f, server
 }
@@ -517,23 +524,87 @@ func TestPairingUsesServerCLIAndRechecksScopeWhenItChanges(t *testing.T) {
 	}
 }
 
-func TestColdPairingWithinCollectionBudget(t *testing.T) {
+func TestColdPairingSurvivesShortPollWithoutDuplicateCLI(t *testing.T) {
 	_, c, _ := fixture(t)
 	f, _ := attachRuntime(t, c)
-	f.threads = []liveThread{{ID: "cold", Title: "Cold Windows pairing", Session: &liveSession{Status: "running"}}}
+	f.threads = []liveThread{{ID: "cold", Session: &liveSession{Status: "running"}}}
 	run := c.runtime.run
+	started, release := make(chan struct{}), make(chan struct{})
+	var calls atomic.Int32
 	c.runtime.run = func(ctx context.Context, binary string, args ...string) ([]byte, error) {
 		if reflect.DeepEqual(args, []string{"auth", "pairing", "create", "--help"}) {
+			if calls.Add(1) == 1 {
+				close(started)
+			}
 			select {
-			case <-time.After(3 * time.Second):
+			case <-release:
 			case <-ctx.Done():
 				return nil, ctx.Err()
 			}
 		}
 		return run(ctx, binary, args...)
 	}
+	before := time.Now()
+	first := c.Poll()
+	if time.Since(before) > 3*time.Second || first.ActiveSessions != 0 || first.Sources[0].State != "unavailable" {
+		t.Fatalf("cold pairing blocked or claimed liveness: %+v", first)
+	}
+	<-started
+	// More short requests reuse the running command instead of killing it.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	if _, err := c.runtime.snapshot(ctx); err == nil {
+		t.Fatal("pending pairing claimed success")
+	}
+	if calls.Load() != 1 {
+		t.Fatal("duplicate cold CLI command")
+	}
+	close(release)
+	<-c.runtime.pairing.done
 	got := c.Poll()
-	if len(got.Sessions) != 1 || !got.Sessions[0].Active {
-		t.Fatalf("cold pairing lost live thread: %+v", got)
+	if len(got.Sessions) != 1 || !got.Sessions[0].Active || calls.Load() != 1 {
+		t.Fatalf("cold result not reused: %+v", got)
+	}
+}
+
+func TestPendingPairingCancelledWhenRuntimeChanges(t *testing.T) {
+	r := newRuntime("unused", "native")
+	oldStarted, oldCancelled := make(chan struct{}), make(chan struct{})
+	var calls atomic.Int32
+	r.run = func(ctx context.Context, _ string, _ ...string) ([]byte, error) {
+		if calls.Add(1) == 1 {
+			close(oldStarted)
+			<-ctx.Done()
+			close(oldCancelled)
+			return nil, ctx.Err()
+		}
+		return []byte("new runtime result"), nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	_, _ = r.runPairing(ctx, "native", "help")
+	<-oldStarted
+	r.identity = "replacement"
+	output, err := r.runPairing(context.Background(), "native", "help")
+	if err != nil || string(output) != "new runtime result" {
+		t.Fatalf("stale pairing result: %q %v", output, err)
+	}
+	<-oldCancelled
+}
+
+func TestHungLiveAPIStillUsesShortCollectionBudget(t *testing.T) {
+	_, c, _ := fixture(t)
+	f, _ := attachRuntime(t, c)
+	f.threads = []liveThread{{ID: "live", Session: &liveSession{Status: "running"}}}
+	if got := c.Poll(); got.ActiveSessions != 1 {
+		t.Fatal(got)
+	}
+	release := make(chan struct{})
+	f.beforeShell = func() { <-release }
+	before := time.Now()
+	got := c.Poll()
+	close(release)
+	if time.Since(before) > 3*time.Second || got.ActiveSessions != 0 || got.Sources[0].State != "unavailable" {
+		t.Fatalf("hung API escaped short budget or retained liveness: %+v", got)
 	}
 }

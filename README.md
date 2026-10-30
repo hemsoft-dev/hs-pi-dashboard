@@ -314,9 +314,11 @@ leaving partial `.staging-*` folders (#42).
 The supplied Air LaunchAgent sets an absolute `-t3-bin` path because launchd does
 not inherit an interactive shell's PATH. Adjust that path for other installations.
 
-Database and live requests share a 30-second polling deadline to allow cold
-Windows native CLI pairing. The fleet allows 35 seconds for session collection;
-other endpoint timeouts remain unchanged. Missing discovery,
+Database and live requests share a 2.5-second polling deadline, within the fleet
+request limit of 3 seconds. Native CLI pairing commands alone may continue for
+up to 30 seconds across polls, with at most one command in flight per source.
+A later poll consumes the result instead of restarting a slow Windows cold start.
+Pending pairing reports unavailable; credentials and results remain in memory. Missing discovery,
 a stopped runtime, failed authentication, timeouts or incompatible responses leave
 T3 metadata visible as unavailable and clear its active count. Fresh or stale
 persisted running metadata cannot keep a dead thread active. Collection retries

@@ -37,6 +37,7 @@ type runtimeSource struct {
 	identity     string
 	token        string
 	expires      time.Time
+	pairing      *pairingCommand
 }
 
 type liveThread struct {
@@ -256,7 +257,7 @@ func (r *runtimeSource) snapshot(ctx context.Context) ([]liveThread, error) {
 
 func (r *runtimeSource) authorize(ctx context.Context, base, binary string) error {
 	if r.scopedCLI == nil || r.scopedFor != binary {
-		help, err := r.run(ctx, binary, "auth", "pairing", "create", "--help")
+		help, err := r.runPairing(ctx, binary, "auth", "pairing", "create", "--help")
 		if err != nil {
 			return errors.New("T3 local pairing capabilities unavailable")
 		}
@@ -270,7 +271,7 @@ func (r *runtimeSource) authorize(ctx context.Context, base, binary string) erro
 	}
 	// Older supported CLIs have no scope flag. Their one-minute, single-use
 	// grant is sent only to the verified local process and immediately narrowed.
-	data, err := r.run(ctx, binary, args...)
+	data, err := r.runPairing(ctx, binary, args...)
 	var grant struct {
 		Credential string `json:"credential"`
 	}
@@ -423,4 +424,42 @@ func (t liveThread) v2State() (string, bool) {
 		return "working", true
 	}
 	return "idle", false
+}
+
+// Only native CLI startup may outlive a poll. A single bounded command is kept
+// across polls, so a slow cold start is not killed and restarted every 2.5s.
+// Access is serialized by Collector.mu; the worker owns only local state.
+type pairingCommand struct {
+	key    string
+	done   chan struct{}
+	cancel context.CancelFunc
+	output []byte
+	err    error
+}
+
+func (r *runtimeSource) runPairing(ctx context.Context, binary string, args ...string) ([]byte, error) {
+	key := r.identity + "\x00" + binary + "\x00" + strings.Join(args, "\x00")
+	if r.pairing != nil && r.pairing.key != key {
+		r.pairing.cancel()
+		r.pairing = nil
+	}
+	if r.pairing == nil {
+		commandCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		pending := &pairingCommand{key: key, done: make(chan struct{}), cancel: cancel}
+		r.pairing = pending
+		run := r.run
+		go func() {
+			defer cancel()
+			pending.output, pending.err = run(commandCtx, binary, args...)
+			close(pending.done)
+		}()
+	}
+	pending := r.pairing
+	select {
+	case <-pending.done:
+		r.pairing = nil
+		return pending.output, pending.err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }

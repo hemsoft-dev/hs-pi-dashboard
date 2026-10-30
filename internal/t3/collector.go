@@ -79,9 +79,7 @@ func (c *Collector) Poll() sessions.Snapshot {
 	if err != nil {
 		return c.unavailable(now, "T3 database unavailable")
 	}
-	// Windows native CLI cold starts can take several seconds per pairing call.
-	// Include both the projection query and initial scoped pairing in the budget.
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 2500*time.Millisecond)
 	defer cancel()
 	// Escape the complete native path, including Windows drive letters and
 	// backslashes. URL.Path would render drive paths as opaque file URIs.

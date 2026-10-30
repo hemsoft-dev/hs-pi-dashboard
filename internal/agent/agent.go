@@ -123,7 +123,7 @@ func sessionHandler(opts Options) http.HandlerFunc {
 }
 
 // Poll sources together so multiple T3 environments share the same wall-clock
-// budget. Each T3 collection has a 30s limit; the fleet session request allows 35s.
+// budget. Each T3 query has a 2.5s limit; the fleet request allows 3s.
 func pollSources(pollers []func() sessions.Snapshot) []sessions.Snapshot {
 	snapshots := make([]sessions.Snapshot, len(pollers))
 	var workers sync.WaitGroup

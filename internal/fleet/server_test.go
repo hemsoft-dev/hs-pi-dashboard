@@ -240,19 +240,30 @@ func TestFleetCarriesMuseAllowanceFieldsAlongsideOldAgents(t *testing.T) {
 	}
 }
 
-// Windows pairing alone can exceed the former three-second HTTP limit.
-func TestColdSessionCollectionRemainsOnline(t *testing.T) {
-	agent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		select {
-		case <-time.After(3100 * time.Millisecond):
-			_ = json.NewEncoder(w).Encode(sessions.Snapshot{Machine: "laptop", Sessions: []sessions.Summary{{ID: "cold-thread", Active: true}}})
-		case <-r.Context().Done():
+// A hung agent must retain the configured short deadline. In particular a
+// source-specific cold CLI allowance must not become a blanket HTTP minimum.
+func TestHungAgentKeepsShortDeadlineAndHealthyTargetRefreshes(t *testing.T) {
+	hung := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { <-r.Context().Done() }))
+	defer hung.Close()
+	healthy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/sessions":
+			_ = json.NewEncoder(w).Encode(sessions.Snapshot{Machine: "healthy", Sessions: []sessions.Summary{{ID: "live"}}})
+		default:
+			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
-	defer agent.Close()
-	server := NewServer(nil, time.Second)
-	got := server.fetch(context.Background(), Target{Name: "laptop", URL: agent.URL})
-	if !got.Online || len(got.Sessions) != 1 || got.Sessions[0].ID != "cold-thread" {
-		t.Fatalf("cold collection lost: %+v", got)
+	defer healthy.Close()
+	server := NewServer([]Target{{Name: "hung", URL: hung.URL}, {Name: "healthy", URL: healthy.URL}}, time.Second)
+	server.timeout = 20 * time.Millisecond
+	before := time.Now()
+	for range 2 {
+		server.poll(context.Background())
+	}
+	if time.Since(before) > time.Second {
+		t.Fatal("hung agent overrode configured fleet timeout")
+	}
+	if server.cache["hung"].Online || !server.cache["healthy"].Online || len(server.cache["healthy"].Sessions) != 1 {
+		t.Fatalf("healthy target did not refresh: %+v", server.cache)
 	}
 }
