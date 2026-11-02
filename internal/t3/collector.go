@@ -184,18 +184,27 @@ func (c *Collector) Poll() sessions.Snapshot {
 				var sessionID, providerID, claudeIDs string
 				var historicalClaudeIDs []string
 				var identityErr error
-				if v2 > 0 {
-					identityErr = db.QueryRowContext(ctx, v2IdentityQuery, thread.ID).Scan(&providerID, &provider, &claudeIDs)
-					sessionID = providerID
-					if identityErr == nil {
-						identityErr = json.Unmarshal([]byte(claudeIDs), &historicalClaudeIDs)
+				for attempt := 0; attempt < 2; attempt++ {
+					if v2 > 0 {
+						identityErr = db.QueryRowContext(ctx, v2IdentityQuery, thread.ID).Scan(&providerID, &provider, &claudeIDs)
+						sessionID = providerID
+					} else {
+						identityErr = db.QueryRowContext(ctx, `SELECT COALESCE(provider_session_id,''),COALESCE(provider_thread_id,'') FROM projection_thread_sessions WHERE thread_id=?`, thread.ID).Scan(&sessionID, &providerID)
 					}
-				} else {
-					identityErr = db.QueryRowContext(ctx, `SELECT COALESCE(provider_session_id,''),COALESCE(provider_thread_id,'') FROM projection_thread_sessions WHERE thread_id=?`, thread.ID).Scan(&sessionID, &providerID)
+					if !sqliteBusy(identityErr) {
+						break
+					}
+				}
+				if sqliteBusy(identityErr) {
+					return c.busy(now)
+				}
+				if identityErr == nil && v2 > 0 {
+					identityErr = json.Unmarshal([]byte(claudeIDs), &historicalClaudeIDs)
 				}
 				if identityErr != nil && !errors.Is(identityErr, sql.ErrNoRows) {
 					return c.unavailable(now, "T3 provider identities unavailable")
 				}
+
 				turnStart, turnEnd := thread.ActivityRunStartedAt, thread.LatestRunCompletedAt
 				if turnStart == "" {
 					turnStart = thread.LatestRunStartedAt

@@ -85,3 +85,45 @@ func TestV2ReadReleasesDatabaseBeforeRuntime(t *testing.T) {
 	exec(t, db, "BEGIN EXCLUSIVE")
 	exec(t, db, "ROLLBACK")
 }
+
+func TestV2IdentityWriteLockAfterProjection(t *testing.T) {
+	for _, brief := range []bool{false, true} {
+		t.Run(map[bool]string{false: "retained", true: "retry"}[brief], func(t *testing.T) {
+			db, c, now := v2Fixture(t)
+			v2Thread(t, db, "known", now)
+			f, _ := attachRuntime(t, c)
+			f.v2 = true
+			f.threads = []liveThread{{ID: "known", Status: "running"}}
+			good := c.Poll()
+			if good.Sources[0].State != "healthy" || good.ActiveSessions != 1 {
+				t.Fatal(good)
+			}
+			f.threads = append(f.threads, liveThread{ID: "new", Status: "running"})
+			released := make(chan error, 1)
+			f.beforeShell = func() {
+				exec(t, db, "BEGIN EXCLUSIVE")
+				if brief {
+					go func() { time.Sleep(650 * time.Millisecond); _, err := db.Exec("ROLLBACK"); released <- err }()
+				}
+			}
+			c.now = func() time.Time { return now.Add(time.Minute) }
+			got := c.Poll()
+			if brief {
+				if err := <-released; err != nil {
+					t.Fatal(err)
+				}
+				if got.Sources[0].State != "healthy" || got.ActiveSessions != 2 || got.Sources[0].Error != "" {
+					t.Fatalf("identity retry: %+v", got)
+				}
+			} else {
+				exec(t, db, "ROLLBACK")
+				if got.Sources[0].State != "healthy" || got.ActiveSessions != 1 || !got.GeneratedAt.Equal(good.GeneratedAt) || !strings.Contains(got.Sources[0].Error, "busy") {
+					t.Fatalf("identity cache: %+v", got)
+				}
+				if recovered := c.Poll(); recovered.ActiveSessions != 2 || recovered.Sources[0].Error != "" {
+					t.Fatalf("identity recovery: %+v", recovered)
+				}
+			}
+		})
+	}
+}
