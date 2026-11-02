@@ -211,6 +211,15 @@ balance is inferred. Future Pi streaming support would use an extension.
 
 ## T3 Code collection
 
+T3 projection reads open SQLite strictly read-only with a 500 ms busy timeout
+and one retry inside the existing 2.5-second poll deadline. V2 uses a single
+autocommit query and closes its rows before querying the live runtime. On
+SQLite BUSY/LOCKED only, the collector retains its last successful snapshot
+and activity state for up to five minutes. The original `lastSuccessAt` and
+session timestamps expose its age, and the source error marks it as cached.
+Missing/expired snapshots, incompatible schema and runtime failures remain
+unavailable, never an idle machine inferred from missing telemetry.
+
 Each agent reads `~/.t3/userdata/state.sqlite` in SQLite read-only mode and verifies
 live states through T3's local `/api/orchestration/shell` endpoint. It collects
 all non-deleted threads across every project in that environment, including closed
