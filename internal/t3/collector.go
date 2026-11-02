@@ -17,7 +17,7 @@ import (
 	"time"
 
 	"github.com/HemSoft/hs-pi-dashboard/internal/sessions"
-	_ "modernc.org/sqlite"
+	"modernc.org/sqlite"
 )
 
 // Collector owns the incremental activity cache for one T3 environment.
@@ -61,8 +61,8 @@ func New(path string, window time.Duration, binary string) *Collector {
 	return &Collector{path: path, runtime: newRuntime(path, binary), defaultPath: defaultPath, window: window, now: time.Now, activities: map[string]*activity{}}
 }
 
-// Poll reads a consistent projection snapshot. A failed source retains cached
-// metadata but clears activity so it cannot inflate Pulse or look live.
+// Poll reads projections without holding a transaction across runtime polling.
+// Only transient contention may retain a recent successful snapshot.
 func (c *Collector) Poll() sessions.Snapshot {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -83,55 +83,30 @@ func (c *Collector) Poll() sessions.Snapshot {
 	defer cancel()
 	// Escape the complete native path, including Windows drive letters and
 	// backslashes. URL.Path would render drive paths as opaque file URIs.
-	dsn := "file:" + strings.ReplaceAll(url.QueryEscape(c.path), "+", "%20") + "?mode=ro"
+	dsn := "file:" + strings.ReplaceAll(url.QueryEscape(c.path), "+", "%20") + "?mode=ro&_pragma=busy_timeout(500)"
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return c.unavailable(now, "T3 database could not be opened read-only")
 	}
 	defer db.Close()
 	db.SetMaxOpenConns(1)
-	tx, err := db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
-	if err != nil {
-		return c.unavailable(now, fmt.Sprintf("T3 database is locked or unreadable: %v", err))
-	}
-	defer tx.Rollback()
-	var v2 int
-	if err = tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='orchestration_v2_projection_threads'").Scan(&v2); err != nil {
-		return c.unavailable(now, "T3 database schema could not be inspected")
-	}
 	var rows []sessions.Summary
 	var rowID int64
-	next := map[string]*activity{}
-	if v2 > 0 {
-		rows, err = c.readV2Threads(ctx, tx)
-		if err != nil {
-			return c.unavailable(now, "T3 V2 projections unavailable: incompatible schema or locked database")
-		}
-	} else {
-		if filepath.Base(c.path) == "statev2.sqlite" {
-			return c.unavailable(now, "T3 V2 projections unavailable: incompatible schema")
-		}
-		// V1 versions before event sequence projection leave sequence NULL.
-		if err = tx.QueryRowContext(ctx, "SELECT COALESCE(MAX(rowid),0) FROM projection_thread_activities").Scan(&rowID); err != nil {
-			return c.unavailable(now, "T3 projections unavailable: incompatible schema or locked database")
-		}
-		old := c.activities
-		after := c.rowID
-		if c.file == nil || !os.SameFile(c.file, info) || rowID < after {
-			old = nil
-			after = 0
-		}
-		next = cloneActivities(old)
-		if err = readActivities(ctx, tx, after, next); err != nil {
-			return c.unavailable(now, "T3 activity projections unavailable")
-		}
-		rows, err = c.readThreads(ctx, tx, next, now)
-		if err != nil {
-			return c.unavailable(now, "T3 thread projections unavailable: incompatible schema or locked database")
+	var v2 int
+	var next map[string]*activity
+	// Each attempt owns and releases its reads before retrying. The busy handler
+	// waits up to 500 ms per statement; the poll deadline bounds total work.
+	for attempt := 0; attempt < 2; attempt++ {
+		rows, rowID, v2, next, err = c.readProjections(ctx, db, info, now)
+		if !sqliteBusy(err) {
+			break
 		}
 	}
-	if err = tx.Commit(); err != nil {
-		return c.unavailable(now, "T3 database snapshot interrupted")
+	if err != nil {
+		if sqliteBusy(err) {
+			return c.busy(now)
+		}
+		return c.unavailable(now, fmt.Sprintf("T3 projections unavailable: incompatible schema or unreadable data: %v", err))
 	}
 	runtimeError := ""
 	if c.runtime != nil {
@@ -209,18 +184,27 @@ func (c *Collector) Poll() sessions.Snapshot {
 				var sessionID, providerID, claudeIDs string
 				var historicalClaudeIDs []string
 				var identityErr error
-				if v2 > 0 {
-					identityErr = db.QueryRowContext(ctx, v2IdentityQuery, thread.ID).Scan(&providerID, &provider, &claudeIDs)
-					sessionID = providerID
-					if identityErr == nil {
-						identityErr = json.Unmarshal([]byte(claudeIDs), &historicalClaudeIDs)
+				for attempt := 0; attempt < 2; attempt++ {
+					if v2 > 0 {
+						identityErr = db.QueryRowContext(ctx, v2IdentityQuery, thread.ID).Scan(&providerID, &provider, &claudeIDs)
+						sessionID = providerID
+					} else {
+						identityErr = db.QueryRowContext(ctx, `SELECT COALESCE(provider_session_id,''),COALESCE(provider_thread_id,'') FROM projection_thread_sessions WHERE thread_id=?`, thread.ID).Scan(&sessionID, &providerID)
 					}
-				} else {
-					identityErr = db.QueryRowContext(ctx, `SELECT COALESCE(provider_session_id,''),COALESCE(provider_thread_id,'') FROM projection_thread_sessions WHERE thread_id=?`, thread.ID).Scan(&sessionID, &providerID)
+					if !sqliteBusy(identityErr) {
+						break
+					}
+				}
+				if sqliteBusy(identityErr) {
+					return c.busy(now)
+				}
+				if identityErr == nil && v2 > 0 {
+					identityErr = json.Unmarshal([]byte(claudeIDs), &historicalClaudeIDs)
 				}
 				if identityErr != nil && !errors.Is(identityErr, sql.ErrNoRows) {
 					return c.unavailable(now, "T3 provider identities unavailable")
 				}
+
 				turnStart, turnEnd := thread.ActivityRunStartedAt, thread.LatestRunCompletedAt
 				if turnStart == "" {
 					turnStart = thread.LatestRunStartedAt
@@ -272,6 +256,70 @@ func (c *Collector) Poll() sessions.Snapshot {
 	return snap
 }
 
+// projectionReader allows the V2 reader to use one autocommit statement.
+// V1 keeps its incremental cursor and activity reads in one bounded transaction.
+type projectionReader interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}
+
+func sqliteBusy(err error) bool {
+	var sqliteErr *sqlite.Error
+	return errors.As(err, &sqliteErr) && (sqliteErr.Code()&255 == 5 || sqliteErr.Code()&255 == 6)
+}
+
+func (c *Collector) busy(now time.Time) sessions.Snapshot {
+	if len(c.last.Sources) > 0 {
+		health := c.last.Sources[0]
+		age := now.Sub(health.LastSuccessAt)
+		if health.Path == c.path && health.State != "unavailable" && !health.LastSuccessAt.IsZero() && age >= 0 && age <= 5*time.Minute {
+			snap := c.last
+			snap.Sources = append([]sessions.SourceHealth(nil), c.last.Sources...)
+			snap.Sources[0].Error = "T3 database busy; cached snapshot with original lastSuccessAt"
+			return snap
+		}
+	}
+	return c.unavailable(now, "T3 database busy; no successful snapshot within five minutes")
+}
+
+func (c *Collector) readProjections(ctx context.Context, db *sql.DB, info os.FileInfo, now time.Time) ([]sessions.Summary, int64, int, map[string]*activity, error) {
+	var v2 int
+	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='orchestration_v2_projection_threads'").Scan(&v2); err != nil {
+		return nil, 0, 0, nil, err
+	}
+	if v2 > 0 {
+		rows, err := c.readV2Threads(ctx, db)
+		if err != nil {
+			err = fmt.Errorf("T3 V2 projections: %w", err)
+		}
+		return rows, 0, v2, map[string]*activity{}, err
+	}
+	if filepath.Base(c.path) == "statev2.sqlite" {
+		return nil, 0, 0, nil, errors.New("missing V2 projection tables")
+	}
+	tx, err := db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, 0, 0, nil, err
+	}
+	defer tx.Rollback()
+	var rowID int64
+	if err = tx.QueryRowContext(ctx, "SELECT COALESCE(MAX(rowid),0) FROM projection_thread_activities").Scan(&rowID); err != nil {
+		return nil, 0, 0, nil, err
+	}
+	old, after := c.activities, c.rowID
+	if c.file == nil || !os.SameFile(c.file, info) || rowID < after {
+		old, after = nil, 0
+	}
+	next := cloneActivities(old)
+	if err = readActivities(ctx, tx, after, next); err != nil {
+		return nil, 0, 0, nil, err
+	}
+	rows, err := c.readThreads(ctx, tx, next, now)
+	if err != nil {
+		return nil, 0, 0, nil, err
+	}
+	return rows, rowID, 0, next, tx.Commit()
+}
+
 func (c *Collector) prefix() string {
 	path := c.path
 	// V2 imports the same app thread IDs from V1; keep their dashboard identity.
@@ -292,6 +340,7 @@ func (c *Collector) unavailable(now time.Time, reason string) sessions.Snapshot 
 		row.T3Status = nil
 		snap.Sessions = append(snap.Sessions, row)
 	}
+	c.last = snap
 	return snap
 }
 

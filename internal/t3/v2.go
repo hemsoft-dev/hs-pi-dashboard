@@ -2,7 +2,6 @@ package t3
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"time"
 
@@ -56,7 +55,7 @@ const v2IdentityQuery = `WITH claude_ids AS (` + v2ClaudeIdentities + `) SELECT 
  LEFT JOIN claude_ids claude ON claude.thread_id=t.thread_id
  WHERE t.thread_id=? AND t.deleted_at IS NULL`
 
-func (c *Collector) readV2Threads(ctx context.Context, tx *sql.Tx) ([]sessions.Summary, error) {
+func (c *Collector) readV2Threads(ctx context.Context, tx projectionReader) ([]sessions.Summary, error) {
 	rows, err := tx.QueryContext(ctx, v2ThreadsQuery)
 	if err != nil {
 		return nil, err

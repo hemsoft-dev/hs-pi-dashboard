@@ -159,7 +159,7 @@ func TestReadOnlyFailureRecoveryAndSchemaChange(t *testing.T) {
 	}
 	exec(t, db, `BEGIN EXCLUSIVE`)
 	failed := c.Poll()
-	if failed.ActiveSessions != 0 || len(failed.Sessions) != 1 || failed.Sessions[0].Active || failed.Sessions[0].Status != "unavailable" || failed.Sources[0].State != "unavailable" {
+	if failed.ActiveSessions != 1 || len(failed.Sessions) != 1 || !failed.Sessions[0].Active || failed.Sessions[0].Status != "working" || failed.Sources[0].State != "healthy" || !strings.Contains(failed.Sources[0].Error, "busy") {
 		t.Fatalf("locked cache: %+v", failed)
 	}
 	exec(t, db, `ROLLBACK`)
