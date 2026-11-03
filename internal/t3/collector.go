@@ -33,6 +33,7 @@ type Collector struct {
 	activities     map[string]*activity
 	last           sessions.Snapshot
 	readTimeout    time.Duration
+	runtimeTimeout time.Duration
 	history        map[string]historyCounts
 	historyAt      time.Time
 	historyAttempt time.Time
@@ -121,7 +122,11 @@ func (c *Collector) Poll() sessions.Snapshot {
 	}
 	// SQLite rows and their implicit transaction have closed. Runtime networking
 	// gets its own budget, independent of SQLite and optional history counters.
-	runtimeCtx, runtimeCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	runtimeBudget := c.runtimeTimeout
+	if runtimeBudget <= 0 {
+		runtimeBudget = 5 * time.Second
+	}
+	runtimeCtx, runtimeCancel := context.WithTimeout(context.Background(), runtimeBudget)
 	defer runtimeCancel()
 
 	runtimeError := ""
@@ -203,7 +208,7 @@ func (c *Collector) Poll() sessions.Snapshot {
 				var sessionID, providerID, claudeIDs string
 				var historicalClaudeIDs []string
 				var identityErr error
-				identityCtx, identityCancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+				identityCtx, identityCancel := context.WithTimeout(runtimeCtx, 1500*time.Millisecond)
 				for attempt := 0; attempt < 2; attempt++ {
 					if v2 > 0 {
 						identityErr = db.QueryRowContext(identityCtx, v2IdentityQuery, thread.ID).Scan(&providerID, &provider, &claudeIDs)
@@ -365,7 +370,12 @@ func (c *Collector) readProjections(ctx context.Context, db *sql.DB, info os.Fil
 }
 
 func (c *Collector) prefix() string {
-	path := c.path
+	return SessionPrefix(c.path)
+}
+
+// SessionPrefix maps source-health paths to the corresponding session namespace.
+// V2 preserves the imported V1 identity for the same environment.
+func SessionPrefix(path string) string {
 	// V2 imports the same app thread IDs from V1; keep their dashboard identity.
 	if filepath.Base(path) == "statev2.sqlite" {
 		path = filepath.Join(filepath.Dir(path), "state.sqlite")

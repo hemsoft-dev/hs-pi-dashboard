@@ -3,6 +3,7 @@ package t3
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -11,14 +12,28 @@ import (
 type historyFailure struct {
 	projectionReader
 	calls int
+	err   error
 }
 
 func (r *historyFailure) QueryContext(ctx context.Context, q string, args ...any) (*sql.Rows, error) {
 	if q == v2HistoryQuery {
 		r.calls++
+		if r.err != nil {
+			return nil, r.err
+		}
 		return nil, context.DeadlineExceeded
 	}
 	return r.projectionReader.QueryContext(ctx, q, args...)
+}
+
+func TestHistoryScanFailureCannotInvalidateMetadata(t *testing.T) {
+	db, c, now := v2Fixture(t)
+	v2Thread(t, db, "one", now)
+	failed := &historyFailure{projectionReader: db, err: errors.New("counter scan conversion failed")}
+	rows, err := c.readV2Threads(context.Background(), failed)
+	if err != nil || len(rows) != 1 || rows[0].Name != "V2 one" || rows[0].T3CountsError == "" || rows[0].T3CountsAt != nil {
+		t.Fatalf("optional scan failed liveness: %+v %v", rows, err)
+	}
 }
 
 func TestHistoryCountersHaveIndependentCadenceAndAge(t *testing.T) {

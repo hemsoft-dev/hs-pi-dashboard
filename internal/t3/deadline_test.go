@@ -6,6 +6,32 @@ import (
 	"time"
 )
 
+func TestLateIdentityReadSharesRemainingRuntimeBudget(t *testing.T) {
+	db, c, now := v2Fixture(t)
+	v2Thread(t, db, "known", now)
+	f, _ := attachRuntime(t, c)
+	f.v2 = true
+	f.threads = []liveThread{{ID: "known", Status: "running"}}
+	if got := c.Poll(); got.ActiveSessions != 1 {
+		t.Fatal(got)
+	}
+	c.runtimeTimeout = 350 * time.Millisecond
+	f.threads = append(f.threads, liveThread{ID: "late", Status: "running"})
+	released := make(chan error, 1)
+	f.beforeShell = func() {
+		time.Sleep(200 * time.Millisecond)
+		exec(t, db, "BEGIN EXCLUSIVE")
+		go func() { time.Sleep(400 * time.Millisecond); _, err := db.Exec("ROLLBACK"); released <- err }()
+	}
+	got := c.Poll()
+	if err := <-released; err != nil {
+		t.Fatal(err)
+	}
+	if got.ActiveSessions != 1 || got.Sources[0].State != "healthy" || !strings.Contains(got.Sources[0].Error, "provider identities read deadline") {
+		t.Fatalf("identity escaped shared deadline: %+v", got)
+	}
+}
+
 func TestDeadlineCannotRetainIdleAsDispatchCapacity(t *testing.T) {
 	_, c, now := v2Fixture(t)
 	if c.Poll().Sources[0].State != "healthy" {

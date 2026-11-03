@@ -112,9 +112,7 @@ func (c *Collector) readV2Threads(ctx context.Context, tx projectionReader) ([]s
 	if err := rows.Close(); err != nil {
 		return nil, err
 	}
-	if err := c.historyCounters(ctx, tx, out); err != nil {
-		return nil, err
-	}
+	c.historyCounters(ctx, tx, out)
 	return out, nil
 }
 

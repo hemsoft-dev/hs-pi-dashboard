@@ -2,7 +2,6 @@ package t3
 
 import (
 	"context"
-	"fmt"
 	"github.com/HemSoft/hs-pi-dashboard/internal/sessions"
 	"strings"
 	"time"
@@ -24,7 +23,7 @@ const v2HistoryQuery = `SELECT thread_id,SUM(messages),SUM(tools) FROM (
 
 type historyCounts struct{ messages, tools int }
 
-func (c *Collector) historyCounters(ctx context.Context, db projectionReader, threads []sessions.Summary) error {
+func (c *Collector) historyCounters(ctx context.Context, db projectionReader, threads []sessions.Summary) {
 	now := c.now()
 	if c.historyAttempt.IsZero() || now.Sub(c.historyAttempt) >= historyInterval {
 		c.historyAttempt = now
@@ -45,7 +44,9 @@ func (c *Collector) historyCounters(ctx context.Context, db projectionReader, th
 					c.historyError += "; read deadline exceeded"
 				}
 			default:
-				return fmt.Errorf("T3 history schema or data unavailable: %w", err)
+				// Required schema is validated by the metadata statement. A
+				// later optional scan failure cannot invalidate current liveness.
+				c.historyError = "T3 history counters unavailable; refresh failed"
 			}
 		}
 	}
@@ -58,7 +59,6 @@ func (c *Collector) historyCounters(ctx context.Context, db projectionReader, th
 			threads[i].T3CountsAt = &at
 		}
 	}
-	return nil
 }
 
 func readHistory(ctx context.Context, db projectionReader) (map[string]historyCounts, error) {

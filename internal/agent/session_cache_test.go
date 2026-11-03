@@ -2,11 +2,35 @@ package agent
 
 import (
 	"github.com/HemSoft/hs-pi-dashboard/internal/sessions"
+	"github.com/HemSoft/hs-pi-dashboard/internal/t3"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 )
+
+func TestSessionCacheExpiryPreservesOtherT3Environment(t *testing.T) {
+	now := time.Now()
+	oldPath := "/desktop/statev2.sqlite"
+	freshPath := "/server/statev2.sqlite"
+	original := sessions.Snapshot{GeneratedAt: now, ActiveSessions: 2,
+		Sources: []sessions.SourceHealth{
+			{Source: "t3", Path: oldPath, State: "healthy", LastSuccessAt: now.Add(-6 * time.Minute)},
+			{Source: "t3", Path: freshPath, State: "healthy", LastSuccessAt: now},
+		}, Sessions: []sessions.Summary{
+			{ID: t3.SessionPrefix(oldPath) + "old", Source: "t3", Active: true, Status: "working"},
+			{ID: t3.SessionPrefix(freshPath) + "fresh", Source: "t3", Active: true, Status: "working"},
+		},
+	}
+	cache := &sessionCache{now: func() time.Time { return now }, running: true, last: original}
+	got := cache.snapshot()
+	if got.ActiveSessions != 1 || got.Sessions[0].Active || got.Sessions[0].Status != "unavailable" || !got.Sessions[1].Active || got.Sessions[1].Status != "working" || got.Sources[1].State != "healthy" {
+		t.Fatalf("cross-source expiry: %+v", got)
+	}
+	if original.ActiveSessions != 2 || !original.Sessions[0].Active {
+		t.Fatal("mutated stored source")
+	}
+}
 
 func TestSessionCacheCoalescesSlowRequestsAndWaitsAfterCompletion(t *testing.T) {
 	entered := make(chan struct{}, 2)

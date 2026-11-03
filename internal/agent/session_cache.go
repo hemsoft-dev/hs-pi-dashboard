@@ -2,6 +2,8 @@ package agent
 
 import (
 	"github.com/HemSoft/hs-pi-dashboard/internal/sessions"
+	"github.com/HemSoft/hs-pi-dashboard/internal/t3"
+	"strings"
 	"sync"
 	"time"
 )
@@ -37,6 +39,9 @@ func (c *sessionCache) snapshot() sessions.Snapshot {
 	}
 	snap := c.last
 	expired := false
+	expiredPrefixes := map[string]bool{}
+	freshPrefixes := map[string]bool{}
+	unknownExpired := false
 	snap.Sources = append([]sessions.SourceHealth(nil), snap.Sources...)
 	for i := range snap.Sources {
 		source := &snap.Sources[i]
@@ -44,6 +49,13 @@ func (c *sessionCache) snapshot() sessions.Snapshot {
 			source.State = "unavailable"
 			source.Error = "T3 cached source expired; collection pending"
 			expired = true
+			if source.Path == "" {
+				unknownExpired = true
+			} else {
+				expiredPrefixes[t3.SessionPrefix(source.Path)] = true
+			}
+		} else if source.Source == "t3" && source.Path != "" {
+			freshPrefixes[t3.SessionPrefix(source.Path)] = true
 		}
 	}
 	if expired {
@@ -51,7 +63,18 @@ func (c *sessionCache) snapshot() sessions.Snapshot {
 		snap.ActiveSessions = 0
 		for i := range snap.Sessions {
 			row := &snap.Sessions[i]
-			if row.Source == "t3" {
+			rowExpired := unknownExpired
+			for prefix := range freshPrefixes {
+				if strings.HasPrefix(row.ID, prefix) {
+					rowExpired = false
+				}
+			}
+			for prefix := range expiredPrefixes {
+				if strings.HasPrefix(row.ID, prefix) {
+					rowExpired = true
+				}
+			}
+			if row.Source == "t3" && rowExpired {
 				row.Active = false
 				row.Status = "unavailable"
 				row.T3Status = nil
