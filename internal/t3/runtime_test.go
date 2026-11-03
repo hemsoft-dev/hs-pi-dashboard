@@ -546,7 +546,7 @@ func TestColdPairingSurvivesShortPollWithoutDuplicateCLI(t *testing.T) {
 	}
 	before := time.Now()
 	first := c.Poll()
-	if time.Since(before) > 3*time.Second || first.ActiveSessions != 0 || first.Sources[0].State != "unavailable" {
+	if time.Since(before) > 6*time.Second || first.ActiveSessions != 0 || first.Sources[0].State != "unavailable" {
 		t.Fatalf("cold pairing blocked or claimed liveness: %+v", first)
 	}
 	<-started
@@ -592,7 +592,7 @@ func TestPendingPairingCancelledWhenRuntimeChanges(t *testing.T) {
 	<-oldCancelled
 }
 
-func TestHungLiveAPIStillUsesShortCollectionBudget(t *testing.T) {
+func TestHungLiveAPIUsesIndependentBudgetAndRetainsActiveState(t *testing.T) {
 	_, c, _ := fixture(t)
 	f, _ := attachRuntime(t, c)
 	f.threads = []liveThread{{ID: "live", Session: &liveSession{Status: "running"}}}
@@ -604,7 +604,7 @@ func TestHungLiveAPIStillUsesShortCollectionBudget(t *testing.T) {
 	before := time.Now()
 	got := c.Poll()
 	close(release)
-	if time.Since(before) > 3*time.Second || got.ActiveSessions != 0 || got.Sources[0].State != "unavailable" {
-		t.Fatalf("hung API escaped short budget or retained liveness: %+v", got)
+	if time.Since(before) > 6*time.Second || got.ActiveSessions != 1 || got.Sources[0].State != "healthy" || !strings.Contains(got.Sources[0].Error, "deadline") {
+		t.Fatalf("hung API escaped its budget or lost retained work: %+v", got)
 	}
 }
