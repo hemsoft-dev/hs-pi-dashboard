@@ -35,6 +35,7 @@ type Collector struct {
 	readTimeout    time.Duration
 	runtimeTimeout time.Duration
 	history        map[string]historyCounts
+	historyFile    os.FileInfo
 	historyAt      time.Time
 	historyAttempt time.Time
 	historyError   string
@@ -331,10 +332,14 @@ func (c *Collector) readProjections(ctx context.Context, db *sql.DB, info os.Fil
 		return nil, 0, 0, nil, err
 	}
 	if v2 > 0 {
-		if c.file == nil || !os.SameFile(c.file, info) {
+		if c.historyFile == nil || !os.SameFile(c.historyFile, info) {
 			c.history = nil
 			c.historyAt = time.Time{}
 			c.historyAttempt = time.Time{}
+			c.historyError = ""
+			// Counter throttling must survive a cold runtime timeout, which
+			// returns before the successful activity cursor c.file is saved.
+			c.historyFile = info
 		}
 		rows, err := c.readV2Threads(ctx, db)
 		if err != nil {

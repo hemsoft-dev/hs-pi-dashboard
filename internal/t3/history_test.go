@@ -4,10 +4,62 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestColdRuntimeTimeoutPreservesHistoryCadence(t *testing.T) {
+	db, c, now := v2Fixture(t)
+	v2Thread(t, db, "one", now)
+	f, _ := attachRuntime(t, c)
+	f.v2 = true
+	f.threads = []liveThread{{ID: "one", Status: "running"}}
+	c.runtimeTimeout = time.Nanosecond
+	if got := c.Poll(); got.Sources[0].State != "unavailable" || c.file != nil {
+		t.Fatalf("cold timeout: %+v", got)
+	}
+	if c.historyFile == nil || c.history["one"].messages != 2 || !c.historyAt.Equal(now) {
+		t.Fatal("initial counter refresh missing")
+	}
+	exec(t, db, "INSERT INTO orchestration_v2_projection_messages VALUES('one','user','{}')")
+	c.now = func() time.Time { return now.Add(time.Second) }
+	if got := c.Poll(); got.Sources[0].State != "unavailable" || c.file != nil {
+		t.Fatalf("repeated timeout: %+v", got)
+	}
+	if c.history["one"].messages != 2 || !c.historyAt.Equal(now) || !c.historyAttempt.Equal(now) {
+		t.Fatal("runtime failure reset history throttle")
+	}
+	c.now = func() time.Time { return now.Add(historyInterval) }
+	c.Poll()
+	if c.history["one"].messages != 3 || !c.historyAt.Equal(now.Add(historyInterval)) {
+		t.Fatal("history cadence did not resume")
+	}
+}
+
+func TestHistoryIdentityResetsWhenDatabaseIsReplaced(t *testing.T) {
+	db, c, now := v2Fixture(t)
+	v2Thread(t, db, "one", now)
+	if got := c.Poll(); got.Sessions[0].MessageCount != 2 {
+		t.Fatal(got)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(c.path, c.path+".replaced"); err != nil {
+		t.Fatal(err)
+	}
+	replacement := createDB(t, c.path)
+	exec(t, replacement, v2Schema)
+	v2Thread(t, replacement, "one", now)
+	exec(t, replacement, "INSERT INTO orchestration_v2_projection_messages VALUES('one','user','{}'),('one','assistant','{}')")
+	c.now = func() time.Time { return now.Add(time.Second) }
+	got := c.Poll()
+	if got.Sources[0].State != "healthy" || got.Sessions[0].MessageCount != 4 || !got.Sessions[0].T3CountsAt.Equal(now.Add(time.Second)) {
+		t.Fatalf("replacement reused counters: %+v", got)
+	}
+}
 
 type historyFailure struct {
 	projectionReader
