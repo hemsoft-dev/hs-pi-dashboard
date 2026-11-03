@@ -26,7 +26,9 @@ func TestSessionsEndpointCombinesPiAndClaudeForFleet(t *testing.T) {
 	handler := sessionHandler(Options{Dir: piDir, ClaudeDir: claudeDir, Machine: "test-machine", T3DBs: []string{"off"}})
 	server := httptest.NewServer(handler)
 	defer server.Close()
+	deadline := time.Now().Add(10 * time.Second)
 	for range 2 {
+	retry:
 		response, err := http.Get(server.URL + "/sessions")
 		if err != nil {
 			t.Fatal(err)
@@ -36,6 +38,10 @@ func TestSessionsEndpointCombinesPiAndClaudeForFleet(t *testing.T) {
 		response.Body.Close()
 		if err != nil {
 			t.Fatal(err)
+		}
+		if len(snap.Sessions) == 0 && time.Now().Before(deadline) {
+			time.Sleep(10 * time.Millisecond)
+			goto retry
 		}
 		if response.StatusCode != 200 || snap.Machine != "test-machine" || snap.ActiveSessions != 2 || len(snap.Sessions) != 2 {
 			t.Fatalf("agent response = %+v", snap)
@@ -62,11 +68,19 @@ func TestT3FailureDoesNotBreakPiEndpoint(t *testing.T) {
 		t.Fatal(err)
 	}
 	handler := sessionHandler(Options{Dir: dir, ClaudeDir: t.TempDir(), T3DBs: []string{filepath.Join(t.TempDir(), "absent.sqlite")}})
-	rec := httptest.NewRecorder()
-	handler(rec, httptest.NewRequest(http.MethodGet, "/sessions", nil))
+	var rec *httptest.ResponseRecorder
 	var snap sessions.Snapshot
-	if err := json.Unmarshal(rec.Body.Bytes(), &snap); err != nil {
-		t.Fatal(err)
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		rec = httptest.NewRecorder()
+		handler(rec, httptest.NewRequest(http.MethodGet, "/sessions", nil))
+		if err := json.Unmarshal(rec.Body.Bytes(), &snap); err != nil {
+			t.Fatal(err)
+		}
+		if len(snap.Sessions) > 0 || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 	if rec.Code != http.StatusOK || len(snap.Sessions) != 1 || snap.ActiveSessions != 1 || len(snap.Sources) != 1 || snap.Sources[0].State != "unavailable" {
 		t.Fatalf("independent sources: %+v", snap)

@@ -43,6 +43,8 @@ type Summary struct {
 	ProviderSessionID string     `json:"providerSessionId,omitempty"`
 	ClaudeSessionIDs  []string   `json:"claudeSessionIds,omitempty"`
 	ProviderThreadID  string     `json:"providerThreadId,omitempty"`
+	T3CountsAt        *time.Time `json:"t3CountsAt,omitempty"`
+	T3CountsError     string     `json:"t3CountsError,omitempty"`
 	ToolCallCount     int        `json:"toolCallCount,omitempty"`
 	TurnStartedAt     *time.Time `json:"turnStartedAt,omitempty"`
 	TurnCompletedAt   *time.Time `json:"turnCompletedAt,omitempty"`
@@ -83,11 +85,13 @@ type T3Usage struct {
 
 // SourceHealth exposes collection failures independently of other sources.
 type SourceHealth struct {
-	Source        string    `json:"source"`
-	Path          string    `json:"path"`
-	State         string    `json:"state"`
-	Error         string    `json:"error,omitempty"`
-	LastSuccessAt time.Time `json:"lastSuccessAt,omitempty"`
+	Source         string    `json:"source"`
+	Path           string    `json:"path"`
+	State          string    `json:"state"`
+	Error          string    `json:"error,omitempty"`
+	LastSuccessAt  time.Time `json:"lastSuccessAt,omitempty"`
+	LastAttemptAt  time.Time `json:"lastAttemptAt,omitempty"`
+	ReadDurationMS int64     `json:"readDurationMs,omitempty"`
 }
 
 // Output is one assistant text turn, kept as it was emitted (newlines and

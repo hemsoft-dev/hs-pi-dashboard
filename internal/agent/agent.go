@@ -114,16 +114,24 @@ func sessionHandler(opts Options) http.HandlerFunc {
 	for _, collector := range collectors {
 		pollers = append(pollers, collector.Poll)
 	}
-	return func(w http.ResponseWriter, r *http.Request) {
-		snaps := pollSources(pollers)
-		snap := sessions.MergeSnapshots(snaps...)
+	cache := &sessionCache{now: time.Now, poll: func() sessions.Snapshot {
+		snap := sessions.MergeSnapshots(pollSources(pollers)...)
 		snap.Machine = opts.Machine
-		writeJSON(w, http.StatusOK, snap)
+		return snap
+	}, last: sessions.Snapshot{Machine: opts.Machine, GeneratedAt: time.Now()}}
+	if len(collectors) > 0 {
+		cache.last.Sources = []sessions.SourceHealth{{Source: "t3", State: "unavailable", Error: "T3 collection starting"}}
 	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		writeJSON(w, http.StatusOK, cache.snapshot())
+	}
+
 }
 
 // Poll sources together so multiple T3 environments share the same wall-clock
-// budget. Each T3 query has a 2.5s limit; the fleet request allows 3s.
+// budget. T3 projection and runtime budgets are independent. HTTP requests
+// serve completed snapshots rather than waiting for these bounded reads.
 func pollSources(pollers []func() sessions.Snapshot) []sessions.Snapshot {
 	snapshots := make([]sessions.Snapshot, len(pollers))
 	var workers sync.WaitGroup

@@ -12,7 +12,8 @@ import (
 // event payloads never cross the SQLite boundary. The legacy tables retained in
 // statev2.sqlite are an import snapshot, not a source of current threads.
 // Aggregate history counts once instead of repeating random table reads for
-// each thread. This leaves the polling deadline available for runtime pairing.
+// each thread. History counts are refreshed separately at a slower cadence;
+// they never gate current runtime activity.
 const v2ClaudeIdentities = `SELECT thread_id,
  json_group_array(DISTINCT json_extract(payload_json,'$.nativeThreadRef.nativeId')) ids
  FROM orchestration_v2_projection_provider_threads
@@ -38,8 +39,8 @@ const v2ThreadsQuery = `WITH claude_ids AS (` + v2ClaudeIdentities + `) SELECT t
  'contextTokens',COALESCE(json_extract(pt.payload_json,'$.contextUsage.usedTokens'),json_extract(turn.payload_json,'$.tokenUsage.usedTokens')),
  'contextLimit',COALESCE(json_extract(pt.payload_json,'$.contextUsage.maxTokens'),json_extract(turn.payload_json,'$.tokenUsage.maxTokens')))
  FROM orchestration_v2_projection_threads t
- LEFT JOIN (SELECT thread_id,COUNT(*) n FROM orchestration_v2_projection_messages WHERE role IN ('user','assistant') GROUP BY thread_id) messages ON messages.thread_id=t.thread_id
- LEFT JOIN (SELECT thread_id,COUNT(*) n FROM orchestration_v2_projection_nodes WHERE kind='tool_call' GROUP BY thread_id) nodes ON nodes.thread_id=t.thread_id
+ LEFT JOIN (SELECT thread_id,COUNT(*) n FROM orchestration_v2_projection_messages WHERE 0 AND role IN ('user','assistant') GROUP BY thread_id) messages ON messages.thread_id=t.thread_id
+ LEFT JOIN (SELECT thread_id,COUNT(*) n FROM orchestration_v2_projection_nodes WHERE 0 AND kind='tool_call' GROUP BY thread_id) nodes ON nodes.thread_id=t.thread_id
  LEFT JOIN claude_ids claude ON claude.thread_id=t.thread_id
  LEFT JOIN projection_projects p ON p.project_id=t.project_id
  LEFT JOIN orchestration_v2_projection_provider_threads pt ON pt.provider_thread_id=t.active_provider_thread_id
@@ -103,7 +104,16 @@ func (c *Collector) readV2Threads(ctx context.Context, tx projectionReader) ([]s
 		}
 		out = append(out, row)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := c.historyCounters(ctx, tx, out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func optionalTime(value string) *time.Time {
