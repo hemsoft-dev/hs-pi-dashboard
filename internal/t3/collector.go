@@ -85,7 +85,7 @@ func (c *Collector) Poll() sessions.Snapshot {
 			c.path = v2
 		}
 	}
-	info, err := os.Stat(c.path)
+	info, err := databaseIdentity(c.path)
 	if err != nil {
 		return c.unavailable(now, "T3 database unavailable")
 	}
@@ -281,6 +281,18 @@ func (c *Collector) Poll() sessions.Snapshot {
 	}
 	c.last = snap
 	return snap
+}
+
+// File.Stat captures the file ID while its read-only handle is open. On
+// Windows os.Stat can defer that lookup until SameFile, reopening the path
+// after a replacement and accidentally identifying the new file as the old one.
+func databaseIdentity(path string) (os.FileInfo, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	return file.Stat()
 }
 
 // projectionReader allows the V2 reader to use one autocommit statement.
