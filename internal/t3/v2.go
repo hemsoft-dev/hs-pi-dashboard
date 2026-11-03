@@ -21,6 +21,8 @@ const v2ClaudeIdentities = `SELECT thread_id,
  AND json_type(payload_json,'$.nativeThreadRef.nativeId')='text'
  AND json_extract(payload_json,'$.nativeThreadRef.nativeId')<>'' GROUP BY thread_id`
 
+// Zero-row history joins validate required tables/columns without scanning them.
+// historyCounters fills exact counters separately after these rows close.
 const v2ThreadsQuery = `WITH claude_ids AS (` + v2ClaudeIdentities + `) SELECT t.thread_id,t.title,COALESCE(p.title,''),
  COALESCE(json_extract(t.payload_json,'$.worktreePath'),p.workspace_root,''),
  t.created_at,t.updated_at,COALESCE(t.archived_at,''),

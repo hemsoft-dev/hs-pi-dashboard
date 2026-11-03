@@ -317,7 +317,7 @@ func (c *Collector) retained(now time.Time, reason string) sessions.Snapshot {
 			return snap
 		}
 	}
-	return c.unavailable(now, reason+"; no successful snapshot within five minutes")
+	return c.unavailable(now, reason+"; no recent active snapshot eligible for five-minute retention")
 }
 
 func (c *Collector) readProjections(ctx context.Context, db *sql.DB, info os.FileInfo, now time.Time) ([]sessions.Summary, int64, int, map[string]*activity, error) {
