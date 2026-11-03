@@ -22,16 +22,25 @@ import (
 
 // Collector owns the incremental activity cache for one T3 environment.
 type Collector struct {
-	path        string
-	runtime     *runtimeSource
-	defaultPath bool
-	window      time.Duration
-	now         func() time.Time
-	mu          sync.Mutex
-	file        os.FileInfo
-	rowID       int64
-	activities  map[string]*activity
-	last        sessions.Snapshot
+	path           string
+	runtime        *runtimeSource
+	defaultPath    bool
+	window         time.Duration
+	now            func() time.Time
+	mu             sync.Mutex
+	file           os.FileInfo
+	rowID          int64
+	activities     map[string]*activity
+	last           sessions.Snapshot
+	readTimeout    time.Duration
+	runtimeTimeout time.Duration
+	history        map[string]historyCounts
+	historyFile    os.FileInfo
+	historyAt      time.Time
+	historyAttempt time.Time
+	historyError   string
+	readMillis     int64
+	attemptAt      time.Time
 }
 
 type activity struct {
@@ -67,6 +76,7 @@ func (c *Collector) Poll() sessions.Snapshot {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	now := c.now()
+	c.attemptAt = now
 	if c.defaultPath {
 		// V2 copies the legacy database once; the files then evolve independently.
 		// Never present that frozen V1 copy as the default live environment.
@@ -75,11 +85,15 @@ func (c *Collector) Poll() sessions.Snapshot {
 			c.path = v2
 		}
 	}
-	info, err := os.Stat(c.path)
+	info, err := databaseIdentity(c.path)
 	if err != nil {
 		return c.unavailable(now, "T3 database unavailable")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2500*time.Millisecond)
+	budget := c.readTimeout
+	if budget <= 0 {
+		budget = 2500 * time.Millisecond
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), budget)
 	defer cancel()
 	// Escape the complete native path, including Windows drive letters and
 	// backslashes. URL.Path would render drive paths as opaque file URIs.
@@ -96,23 +110,34 @@ func (c *Collector) Poll() sessions.Snapshot {
 	var next map[string]*activity
 	// Each attempt owns and releases its reads before retrying. The busy handler
 	// waits up to 500 ms per statement; the poll deadline bounds total work.
+	readStarted := time.Now()
 	for attempt := 0; attempt < 2; attempt++ {
 		rows, rowID, v2, next, err = c.readProjections(ctx, db, info, now)
 		if !sqliteBusy(err) {
 			break
 		}
 	}
+	c.readMillis = time.Since(readStarted).Milliseconds()
 	if err != nil {
-		if sqliteBusy(err) {
-			return c.busy(now)
-		}
-		return c.unavailable(now, fmt.Sprintf("T3 projections unavailable: incompatible schema or unreadable data: %v", err))
+		return c.readFailure(now, "T3 projections", err)
 	}
+	// SQLite rows and their implicit transaction have closed. Runtime networking
+	// gets its own budget, independent of SQLite and optional history counters.
+	runtimeBudget := c.runtimeTimeout
+	if runtimeBudget <= 0 {
+		runtimeBudget = 5 * time.Second
+	}
+	runtimeCtx, runtimeCancel := context.WithTimeout(context.Background(), runtimeBudget)
+	defer runtimeCancel()
+
 	runtimeError := ""
 	if c.runtime != nil {
 		c.runtime.v2 = v2 > 0
-		live, err := c.runtime.snapshot(ctx)
+		live, err := c.runtime.snapshot(runtimeCtx)
 		if err != nil {
+			if errors.Is(runtimeCtx.Err(), context.DeadlineExceeded) {
+				return c.readFailure(now, "T3 live runtime", context.DeadlineExceeded)
+			}
 			runtimeError = err.Error()
 			for i := range rows {
 				rows[i].Active = false
@@ -184,19 +209,21 @@ func (c *Collector) Poll() sessions.Snapshot {
 				var sessionID, providerID, claudeIDs string
 				var historicalClaudeIDs []string
 				var identityErr error
+				identityCtx, identityCancel := context.WithTimeout(runtimeCtx, 1500*time.Millisecond)
 				for attempt := 0; attempt < 2; attempt++ {
 					if v2 > 0 {
-						identityErr = db.QueryRowContext(ctx, v2IdentityQuery, thread.ID).Scan(&providerID, &provider, &claudeIDs)
+						identityErr = db.QueryRowContext(identityCtx, v2IdentityQuery, thread.ID).Scan(&providerID, &provider, &claudeIDs)
 						sessionID = providerID
 					} else {
-						identityErr = db.QueryRowContext(ctx, `SELECT COALESCE(provider_session_id,''),COALESCE(provider_thread_id,'') FROM projection_thread_sessions WHERE thread_id=?`, thread.ID).Scan(&sessionID, &providerID)
+						identityErr = db.QueryRowContext(identityCtx, `SELECT COALESCE(provider_session_id,''),COALESCE(provider_thread_id,'') FROM projection_thread_sessions WHERE thread_id=?`, thread.ID).Scan(&sessionID, &providerID)
 					}
 					if !sqliteBusy(identityErr) {
 						break
 					}
 				}
-				if sqliteBusy(identityErr) {
-					return c.busy(now)
+				identityCancel()
+				if transientRead(identityErr) {
+					return c.readFailure(now, "T3 provider identities", identityErr)
 				}
 				if identityErr == nil && v2 > 0 {
 					identityErr = json.Unmarshal([]byte(claudeIDs), &historicalClaudeIDs)
@@ -234,7 +261,7 @@ func (c *Collector) Poll() sessions.Snapshot {
 		}
 	}
 	c.file, c.rowID, c.activities = info, rowID, next
-	health := sessions.SourceHealth{Source: "t3", Path: c.path, State: "healthy", LastSuccessAt: now}
+	health := sessions.SourceHealth{Source: "t3", Path: c.path, State: "healthy", LastSuccessAt: now, LastAttemptAt: now, ReadDurationMS: c.readMillis}
 	if runtimeError != "" {
 		health.State, health.Error = "unavailable", runtimeError
 		if len(c.last.Sources) > 0 {
@@ -256,6 +283,18 @@ func (c *Collector) Poll() sessions.Snapshot {
 	return snap
 }
 
+// File.Stat captures the file ID while its read-only handle is open. On
+// Windows os.Stat can defer that lookup until SameFile, reopening the path
+// after a replacement and accidentally identifying the new file as the old one.
+func databaseIdentity(path string) (os.FileInfo, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	return file.Stat()
+}
+
 // projectionReader allows the V2 reader to use one autocommit statement.
 // V1 keeps its incremental cursor and activity reads in one bounded transaction.
 type projectionReader interface {
@@ -267,18 +306,36 @@ func sqliteBusy(err error) bool {
 	return errors.As(err, &sqliteErr) && (sqliteErr.Code()&255 == 5 || sqliteErr.Code()&255 == 6)
 }
 
-func (c *Collector) busy(now time.Time) sessions.Snapshot {
+func transientRead(err error) bool {
+	return sqliteBusy(err) || errors.Is(err, context.DeadlineExceeded)
+}
+
+func (c *Collector) readFailure(now time.Time, source string, err error) sessions.Snapshot {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return c.retained(now, source+" read deadline exceeded")
+	}
+	if sqliteBusy(err) {
+		return c.busy(now)
+	}
+	return c.unavailable(now, fmt.Sprintf("%s unavailable: incompatible schema or unreadable data: %v", source, err))
+}
+
+func (c *Collector) busy(now time.Time) sessions.Snapshot { return c.retained(now, "T3 database busy") }
+
+func (c *Collector) retained(now time.Time, reason string) sessions.Snapshot {
 	if len(c.last.Sources) > 0 {
 		health := c.last.Sources[0]
 		age := now.Sub(health.LastSuccessAt)
-		if health.Path == c.path && health.State != "unavailable" && !health.LastSuccessAt.IsZero() && age >= 0 && age <= 5*time.Minute {
+		if health.Path == c.path && health.State != "unavailable" && c.last.ActiveSessions > 0 && !health.LastSuccessAt.IsZero() && age >= 0 && age <= 5*time.Minute {
 			snap := c.last
 			snap.Sources = append([]sessions.SourceHealth(nil), c.last.Sources...)
-			snap.Sources[0].Error = "T3 database busy; cached snapshot with original lastSuccessAt"
+			snap.Sources[0].Error = reason + "; cached snapshot with original lastSuccessAt"
+			snap.Sources[0].LastAttemptAt = c.attemptAt
+			snap.Sources[0].ReadDurationMS = c.readMillis
 			return snap
 		}
 	}
-	return c.unavailable(now, "T3 database busy; no successful snapshot within five minutes")
+	return c.unavailable(now, reason+"; no recent active snapshot eligible for five-minute retention")
 }
 
 func (c *Collector) readProjections(ctx context.Context, db *sql.DB, info os.FileInfo, now time.Time) ([]sessions.Summary, int64, int, map[string]*activity, error) {
@@ -287,6 +344,15 @@ func (c *Collector) readProjections(ctx context.Context, db *sql.DB, info os.Fil
 		return nil, 0, 0, nil, err
 	}
 	if v2 > 0 {
+		if c.historyFile == nil || !os.SameFile(c.historyFile, info) {
+			c.history = nil
+			c.historyAt = time.Time{}
+			c.historyAttempt = time.Time{}
+			c.historyError = ""
+			// Counter throttling must survive a cold runtime timeout, which
+			// returns before the successful activity cursor c.file is saved.
+			c.historyFile = info
+		}
 		rows, err := c.readV2Threads(ctx, db)
 		if err != nil {
 			err = fmt.Errorf("T3 V2 projections: %w", err)
@@ -321,7 +387,12 @@ func (c *Collector) readProjections(ctx context.Context, db *sql.DB, info os.Fil
 }
 
 func (c *Collector) prefix() string {
-	path := c.path
+	return SessionPrefix(c.path)
+}
+
+// SessionPrefix maps source-health paths to the corresponding session namespace.
+// V2 preserves the imported V1 identity for the same environment.
+func SessionPrefix(path string) string {
 	// V2 imports the same app thread IDs from V1; keep their dashboard identity.
 	if filepath.Base(path) == "statev2.sqlite" {
 		path = filepath.Join(filepath.Dir(path), "state.sqlite")
@@ -331,7 +402,7 @@ func (c *Collector) prefix() string {
 }
 
 func (c *Collector) unavailable(now time.Time, reason string) sessions.Snapshot {
-	snap := sessions.Snapshot{GeneratedAt: now, Sources: []sessions.SourceHealth{{Source: "t3", Path: c.path, State: "unavailable", Error: reason}}}
+	snap := sessions.Snapshot{GeneratedAt: now, Sources: []sessions.SourceHealth{{Source: "t3", Path: c.path, State: "unavailable", Error: reason, LastAttemptAt: c.attemptAt, ReadDurationMS: c.readMillis}}}
 	if len(c.last.Sources) > 0 {
 		snap.Sources[0].LastSuccessAt = c.last.Sources[0].LastSuccessAt
 	}

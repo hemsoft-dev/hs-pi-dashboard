@@ -211,14 +211,38 @@ balance is inferred. Future Pi streaming support would use an extension.
 
 ## T3 Code collection
 
-T3 projection reads open SQLite strictly read-only with a 500 ms busy timeout
-and one retry inside the existing 2.5-second poll deadline. V2 uses a single
-autocommit query and closes its rows before querying the live runtime. On
-SQLite BUSY/LOCKED only, the collector retains its last successful snapshot
-and activity state for up to five minutes. The original `lastSuccessAt` and
-session timestamps expose its age, and the source error marks it as cached.
-Missing/expired snapshots, incompatible schema and runtime failures remain
-unavailable, never an idle machine inferred from missing telemetry.
+T3 metadata reads open SQLite strictly read-only with a 500 ms busy timeout
+and one retry inside a 2.5-second projection deadline. The metadata statement
+validates the history schema but does not aggregate messages or tool nodes.
+Exact history counts refresh at most once every 30 seconds, with a separate
+750 ms limit and sequential scans. A failed counter refresh retains its last
+values and original `t3CountsAt`, with `t3CountsError`; a missing timestamp
+means counters are not available yet. History failure never supplies liveness.
+No T3 schema or indexes are changed. Each query closes its rows immediately;
+there is no read transaction across metadata, history, retry or runtime calls.
+
+Runtime reads get a fresh five-second deadline after SQLite closes. Agents
+serve completed `/sessions` snapshots immediately, coalescing concurrent
+requests into one refresh and waiting five seconds after completion before
+starting another. Extra clients do not queue database scans, and idle agents
+without requests run no refresh timer. Snapshot and source timestamps retain
+their original meaning.
+
+SQLite BUSY/LOCKED and read deadlines have distinct errors and may retain
+recent active state for at most five minutes, with original `lastSuccessAt`
+and session timestamps. An idle snapshot is never retained as evidence of
+available dispatch capacity. Missing/expired snapshots, incompatible schema
+and non-timeout runtime failures remain unavailable. `lastAttemptAt` and
+`readDurationMs` expose the last projection attempt for operational checks.
+
+An opt-in load test requires a database of at least 2 GB. Create a consistent
+SQLite online backup named `t3-home-load-copy.sqlite`, set `HS_T3_BENCH_DB` to
+that copy, and optionally set `HS_T3_BENCH_WRITE_COPY=1` to run a bounded WAL
+writer against the copy. Run `go test ./internal/t3 -run
+TestProductionSizedReadUnderWriteLoad -v -count=1 -timeout=60s`. The test opens
+its reader with `mode=ro`, refuses writes to known live T3 files, compares
+before/after plans, and logs only counts, durations and writer commits.
+
 
 Each agent reads `~/.t3/userdata/state.sqlite` in SQLite read-only mode and verifies
 live states through T3's local `/api/orchestration/shell` endpoint. It collects
