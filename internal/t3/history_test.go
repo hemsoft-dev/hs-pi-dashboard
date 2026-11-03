@@ -4,19 +4,33 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"net/http"
 	"os"
 	"strings"
 	"testing"
 	"time"
 )
 
+type deadlineTransport struct{}
+
+func (deadlineTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	<-req.Context().Done()
+	return nil, req.Context().Err()
+}
+
 func TestColdRuntimeTimeoutPreservesHistoryCadence(t *testing.T) {
 	db, c, now := v2Fixture(t)
 	v2Thread(t, db, "one", now)
-	f, _ := attachRuntime(t, c)
-	f.v2 = true
-	f.threads = []liveThread{{ID: "one", Status: "running"}}
-	c.runtimeTimeout = time.Nanosecond
+	attachRuntime(t, c)
+	record, err := os.ReadFile(c.runtime.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.runtime.identity = string(record)
+	c.runtime.token = "private-session-secret"
+	c.runtime.expires = now.Add(time.Hour)
+	c.runtime.client.Transport = deadlineTransport{}
+	c.runtimeTimeout = 20 * time.Millisecond
 	if got := c.Poll(); got.Sources[0].State != "unavailable" || c.file != nil {
 		t.Fatalf("cold timeout: %+v", got)
 	}

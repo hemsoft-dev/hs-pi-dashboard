@@ -33,11 +33,13 @@ func TestLateIdentityReadSharesRemainingRuntimeBudget(t *testing.T) {
 }
 
 func TestDeadlineCannotRetainIdleAsDispatchCapacity(t *testing.T) {
-	_, c, now := v2Fixture(t)
+	db, c, now := v2Fixture(t)
 	if c.Poll().Sources[0].State != "healthy" {
 		t.Fatal("initial snapshot")
 	}
-	c.readTimeout = time.Nanosecond
+	exec(t, db, "BEGIN EXCLUSIVE")
+	defer exec(t, db, "ROLLBACK")
+	c.readTimeout = 20 * time.Millisecond
 	c.now = func() time.Time { return now.Add(time.Minute) }
 	got := c.Poll()
 	if got.Sources[0].State != "unavailable" || got.ActiveSessions != 0 || !strings.Contains(got.Sources[0].Error, "deadline") {
@@ -55,7 +57,9 @@ func TestProjectionDeadlineRetainsStateAndExpires(t *testing.T) {
 	c.last.ActiveSessions = 1
 	c.last.Sessions[0].Active = true
 	c.last.Sessions[0].Status = "working"
-	c.readTimeout = time.Nanosecond
+	exec(t, db, "BEGIN EXCLUSIVE")
+	defer exec(t, db, "ROLLBACK")
+	c.readTimeout = 20 * time.Millisecond
 	c.now = func() time.Time { return now.Add(time.Minute) }
 	got := c.Poll()
 	if got.Sources[0].State != "healthy" || got.ActiveSessions != 1 || !got.GeneratedAt.Equal(good.GeneratedAt) || !strings.Contains(got.Sources[0].Error, "deadline") || strings.Contains(got.Sources[0].Error, "schema") {
