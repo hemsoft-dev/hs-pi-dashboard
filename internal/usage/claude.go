@@ -29,6 +29,14 @@ const (
 	claudeMaxCooldown     = time.Hour
 )
 
+// Fixed card errors, the only Claude failure text an agent publishes.
+const (
+	claudeErrNoSession       = "no Claude subscription session; sign in with Claude Code or Pi"
+	claudeErrSessionRejected = "Claude session rejected (HTTP 401); sign in again with Claude Code"
+	claudeErrAccessDenied    = "Claude usage access denied (HTTP 403); the session lacks usage access"
+	claudeErrRequestFailed   = "Claude usage request failed"
+)
+
 // claudeRateGate remembers rate-limit cooldowns per session, keyed by token
 // hash so credentials are never retained.
 type claudeRateGate struct {
@@ -111,20 +119,27 @@ func (f *Fetcher) claudeToken() string {
 }
 
 func (f *Fetcher) claude(ctx context.Context) Card {
-	card := Card{Key: "claude", Label: "Claude", Kind: KindQuota, FetchedAt: time.Now()}
-	token := f.claudeToken()
-	if token == "" {
-		card.Error = "no Claude subscription session; sign in with Claude Code or Pi"
+	// A configured peer replaces the local session outright. Falling back could
+	// silently switch to another account, the risk claudeToken guards against.
+	if f.ClaudePeer != nil {
+		return f.claudeFromPeer(ctx)
+	}
+	card := Card{Key: "claude", Label: "Claude", Kind: KindQuota, FetchedAt: time.Now(), Claude: &ClaudeProvenance{}}
+	fail := func(status, message string) Card {
+		card.Claude.Status, card.Error = status, message
 		return card
 	}
+	token := f.claudeToken()
+	if token == "" {
+		return fail(claudeStatusNoSession, claudeErrNoSession)
+	}
 	if until := f.claudeGate.blockedUntil(token, card.FetchedAt); !until.IsZero() {
-		card.Error = claudeRateLimited(until, card.FetchedAt)
-		return card
+		card.Claude.NextAttemptAt = until
+		return fail(claudeStatusCooldown, claudeRateLimited(until, card.FetchedAt))
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, claudeUsageURL, nil)
 	if err != nil {
-		card.Error = "could not prepare Claude usage request"
-		return card
+		return fail(claudeStatusRequestFailed, "could not prepare Claude usage request")
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("anthropic-beta", "oauth-2025-04-20")
@@ -133,30 +148,33 @@ func (f *Fetcher) claude(ctx context.Context) Card {
 	req.Header.Set("User-Agent", claudeUserAgent)
 	// Transport errors can contain response URLs or sensitive proxy details.
 	// Publish only a fixed diagnosis, never provider bodies.
+	card.Claude.LastAttemptAt = card.FetchedAt
 	resp, err := f.Client.Do(req)
 	if err != nil {
-		card.Error = "Claude usage request failed"
-		return card
+		return fail(claudeStatusRequestFailed, claudeErrRequestFailed)
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	switch {
 	case resp.StatusCode == http.StatusTooManyRequests:
 		until := f.claudeGate.block(token, resp.Header.Get("Retry-After"), card.FetchedAt)
-		card.Error = claudeRateLimited(until, card.FetchedAt)
-		return card
-	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
-		card.Error = "Claude session expired or lacks usage access; sign in again with Claude Code"
-		return card
+		if until.After(card.FetchedAt) {
+			card.Claude.NextAttemptAt = until
+		}
+		return fail(claudeStatusRateLimited, claudeRateLimited(until, card.FetchedAt))
+	case resp.StatusCode == http.StatusUnauthorized:
+		return fail(claudeStatusAuthRejected, claudeErrSessionRejected)
+	case resp.StatusCode == http.StatusForbidden:
+		return fail(claudeStatusAccessDenied, claudeErrAccessDenied)
 	case resp.StatusCode < 200 || resp.StatusCode > 299 || err != nil:
-		card.Error = "Claude usage request failed"
-		return card
+		return fail(claudeStatusRequestFailed, claudeErrRequestFailed)
 	}
 	f.claudeGate.clear(token)
 	card.Gauges, err = parseClaudeWindows(body, card.FetchedAt)
 	if err != nil {
-		card.Error = err.Error()
+		return fail(claudeStatusInvalidResponse, err.Error())
 	}
+	card.Claude.Status, card.Claude.LastSuccessAt = claudeStatusOK, card.FetchedAt
 	return card
 }
 
