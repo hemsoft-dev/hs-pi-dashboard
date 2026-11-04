@@ -34,11 +34,26 @@ type Options struct {
 	PMDURL       string        // pmd base URL for T3 snapshot pushes; "" or "off" disables
 	PMDTokenFile string        // pmd ingest token file; missing turns the push off
 	PMDSources   []pmd.Source  // T3 databases to push; nil = the only one, as ""
+	// ClaudeUsagePeer takes the Claude card from another agent's own reading
+	// instead of a local session; nil keeps the local collector.
+	ClaudeUsagePeer *usage.ClaudePeer
+}
+
+func newUsageStore(opts Options) *usage.Store {
+	fetcher := usage.New()
+	fetcher.ClaudePeer = opts.ClaudeUsagePeer
+	return usage.NewStore(fetcher, opts.Machine, usagePollInterval(opts.UsagePoll))
+}
+
+func usageHandler(store *usage.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, store.Snapshot())
+	}
 }
 
 // Run starts the agent HTTP server and blocks until it exits.
 func Run(opts Options) error {
-	usageStore := usage.NewStore(usage.New(), opts.Machine, usagePollInterval(opts.UsagePoll))
+	usageStore := newUsageStore(opts)
 	mux := http.NewServeMux()
 	projectStore := projects.New(opts.ProjectPaths, opts.ProjectsPoll)
 	go projectStore.Start(context.Background())
@@ -62,9 +77,7 @@ func Run(opts Options) error {
 		})
 	})
 
-	mux.HandleFunc("GET /usage", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, usageStore.Snapshot())
-	})
+	mux.HandleFunc("GET /usage", usageHandler(usageStore))
 
 	// Refresh provider usage in the background; the endpoint serves the cache.
 	// A fresh background context (not the request's) — the loop outlives requests.

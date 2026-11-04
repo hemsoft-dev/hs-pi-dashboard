@@ -49,23 +49,24 @@ type Gauge struct {
 
 // Card is one provider's dashboard card.
 type Card struct {
-	Codex                *CodexProvenance `json:"codex,omitempty"`
-	codexIdentity        [32]byte         // local cache boundary; never serialized
-	SubscriptionPriceUSD *float64         `json:"subscriptionPriceUsd"`
-	Activity             *Activity        `json:"activity,omitempty"`
-	FreshForSeconds      float64          `json:"freshForSeconds,omitempty"`
-	Billing              *Billing         `json:"billing,omitempty"`
-	Key                  string           `json:"key"`
-	Label                string           `json:"label"`
-	Kind                 string           `json:"kind"`
-	BalanceUSD           *float64         `json:"balanceUsd,omitempty"`
-	Gauges               []Gauge          `json:"gauges,omitempty"`
-	Plan                 string           `json:"plan,omitempty"`            // provider-reported tier, allowlisted text
-	AllowanceSource      string           `json:"allowanceSource,omitempty"` // provider-reported source token
-	ObservedAt           time.Time        `json:"observedAt,omitzero"`       // when the provider observed the reading
-	Warning              string           `json:"warning,omitempty"`
-	Error                string           `json:"error,omitempty"`
-	FetchedAt            time.Time        `json:"fetchedAt"`
+	Codex                *CodexProvenance  `json:"codex,omitempty"`
+	Claude               *ClaudeProvenance `json:"claude,omitempty"`
+	codexIdentity        [32]byte          // local cache boundary; never serialized
+	SubscriptionPriceUSD *float64          `json:"subscriptionPriceUsd"`
+	Activity             *Activity         `json:"activity,omitempty"`
+	FreshForSeconds      float64           `json:"freshForSeconds,omitempty"`
+	Billing              *Billing          `json:"billing,omitempty"`
+	Key                  string            `json:"key"`
+	Label                string            `json:"label"`
+	Kind                 string            `json:"kind"`
+	BalanceUSD           *float64          `json:"balanceUsd,omitempty"`
+	Gauges               []Gauge           `json:"gauges,omitempty"`
+	Plan                 string            `json:"plan,omitempty"`            // provider-reported tier, allowlisted text
+	AllowanceSource      string            `json:"allowanceSource,omitempty"` // provider-reported source token
+	ObservedAt           time.Time         `json:"observedAt,omitzero"`       // when the provider observed the reading
+	Warning              string            `json:"warning,omitempty"`
+	Error                string            `json:"error,omitempty"`
+	FetchedAt            time.Time         `json:"fetchedAt"`
 }
 
 // Snapshot is what the agent /usage endpoint returns.
@@ -89,6 +90,9 @@ const (
 type Fetcher struct {
 	Client *http.Client
 	Home   string // defaults to the current user's home
+	// ClaudePeer republishes another agent's own Claude reading instead of
+	// reading a local session. Nil keeps the local collector.
+	ClaudePeer *ClaudePeer
 
 	githubCacheMu   sync.Mutex
 	githubCache     map[string]billingCacheEntry
@@ -167,6 +171,10 @@ func (s *Store) retain(cards []Card) []Card {
 	}
 	for i, card := range cards {
 		old, ok := previous[card.Key]
+		if card.Claude != nil {
+			mergeClaudeProvenance(&card, old, ok, s.machine)
+			cards[i] = card
+		}
 		if card.Key == "codex" {
 			if !ok || old.Kind != card.Kind || card.Error == "" ||
 				card.codexIdentity == [32]byte{} || card.codexIdentity != old.codexIdentity ||

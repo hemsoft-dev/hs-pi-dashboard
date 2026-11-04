@@ -18,6 +18,7 @@ import (
 	"github.com/HemSoft/hs-pi-dashboard/internal/fleet"
 	"github.com/HemSoft/hs-pi-dashboard/internal/pmd"
 	"github.com/HemSoft/hs-pi-dashboard/internal/projects"
+	providerusage "github.com/HemSoft/hs-pi-dashboard/internal/usage"
 )
 
 const version = "0.2.0"
@@ -84,6 +85,10 @@ Agent flags:
                         (default ~/.config/hs-pi-dashboard/pmd-token; missing = no push)
   -pmd-t3 env=path      T3 database to push as environment env; repeat for
                         several installs (default: the only T3 database, as "")
+  -claude-usage-peer name=http://ip:port
+                        take the Claude card from that agent (loopback or
+                        Tailscale IP) instead of a local session; no credential
+                        is read or sent (default: local session)
 
 Serve flags:
   -addr string          listen address (default ":8788"; bind the Tailscale IP
@@ -120,6 +125,14 @@ func runAgent(args []string) error {
 		}
 		return err
 	})
+	var claudePeer *providerusage.ClaudePeer
+	fs.Func("claude-usage-peer", "take the Claude card from the agent at name=http://ip:port instead of a local session", func(value string) error {
+		peer, err := providerusage.ParseClaudePeer(value)
+		if err == nil {
+			claudePeer = &peer
+		}
+		return err
+	})
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -145,6 +158,8 @@ func runAgent(args []string) error {
 		PMDURL:       *pmdURL,
 		PMDTokenFile: *pmdToken,
 		PMDSources:   pmdSources,
+
+		ClaudeUsagePeer: claudePeer,
 	})
 }
 

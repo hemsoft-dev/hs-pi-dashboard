@@ -161,6 +161,34 @@ The schema and authentication headers were checked against
 and its
 [scoped weekly parser](https://github.com/steipete/CodexBar/blob/59a7d46ac61338786e5d32d8324a3e414525e601/Sources/CodexBarCore/Providers/Claude/ClaudeWeb/ClaudeWebExtraRateWindowParser.swift).
 
+Every Claude card has a `claude` provenance object with allowlisted values and
+times only. `sourceMachine` is the host whose own session produced the reading.
+`status` is that host's last provider result: `ok`, `no_session`, `auth_rejected`
+(HTTP 401), `access_denied` (HTTP 403), `rate_limited` (HTTP 429), `cooldown`,
+`request_failed` or `invalid_response`. `lastAttemptAt` moves only when a request
+was actually sent, so `cooldown` and `no_session` leave it alone. `lastSuccessAt`
+and `fetchedAt` stay at the time of the reading, and `nextAttemptAt` is the end of
+a cooldown.
+
+An agent without a usable session can republish another agent's reading with
+`-claude-usage-peer name=http://ip:port`, for example
+`-claude-usage-peer home=http://100.101.122.39:8787`. The agent then reads the
+peer's cached `GET /usage` once per refresh, and no credential is read or sent.
+The session stays on its host and the peer's read sends nothing to Anthropic, so
+its cooldown is undisturbed. Other provider cards stay local. The setting replaces
+the local Claude session outright: a fallback could silently switch accounts.
+
+The host must be a loopback or Tailscale IP. The client uses no proxy and follows
+no redirect. The peer's `machine` must equal `name`, and a card the peer itself
+republished is refused. Only labels, percentages, resets, window lengths,
+forecasts, times, statuses and the collector's own fixed error messages are
+copied. Other error text, a missing or future reading time, a malformed window
+or a reading older than the retained one fails closed. `peerStatus` then says
+`unreachable`, `http_error`, `invalid`, `identity_mismatch`, `no_card` or
+`out_of_order`, with `peerLastAttemptAt` and `peerLastSuccessAt` beside it. The
+last good reading stays at its original age and the source host's last known
+attempt metadata is kept. Errors the peer itself reports are prefixed with its name.
+
 Muse Code reports its subscription allowance from `muse usage --json`
 (Muse Code 1.4.13+), a command that runs no model turn. The agent runs it
 with `META_API_KEY` removed (an exported key would switch to pay-as-you-go),
