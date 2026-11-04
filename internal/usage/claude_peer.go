@@ -221,7 +221,7 @@ func decodeClaudePeer(body []byte, machine string, now time.Time) (Card, string,
 		if p.PeerStatus != "" || !p.PeerLastAttemptAt.IsZero() || !p.PeerLastSuccessAt.IsZero() {
 			return Card{}, claudePeerInvalid, "agent republishes another machine's reading"
 		}
-		if !claudeProviderStatuses[p.Status] || p.LastAttemptAt.After(now.Add(claudePeerFutureSkew)) {
+		if !claudeProviderStatuses[p.Status] || p.LastAttemptAt.After(now.Add(claudePeerFutureSkew)) || p.LastSuccessAt.After(now.Add(claudePeerFutureSkew)) {
 			return Card{}, claudePeerInvalid, "attempt metadata invalid"
 		}
 	}
@@ -245,6 +245,10 @@ func decodeClaudePeer(body []byte, machine string, now time.Time) (Card, string,
 }
 
 func validClaudePeerGauge(g Gauge) bool {
+	// Match the provider parser: a label or projection alone is no observation.
+	if g.UsedPercent == nil && g.ResetAt.IsZero() {
+		return false
+	}
 	if strings.TrimSpace(g.Label) == "" || len(g.Label) > 128 || strings.ContainsFunc(g.Label, unicode.IsControl) {
 		return false
 	}

@@ -133,6 +133,7 @@ func TestClaudePeerRefusesUnsafeOrUntruthfulReadings(t *testing.T) {
 		{"invalid time", "home", card(`"gauges":[` + gauge + `],"fetchedAt":"yesterday"`), claudePeerInvalid},
 		{"future time", "home", card(`"gauges":[` + gauge + `],"fetchedAt":"` + peerStamp(now.Add(10*time.Minute)) + `"`), claudePeerInvalid},
 		{"future attempt", "home", card(`"gauges":[` + gauge + `],"fetchedAt":"` + good + `","claude":{"lastAttemptAt":"` + peerStamp(now.Add(10*time.Minute)) + `"}`), claudePeerInvalid},
+		{"future success", "home", card(`"gauges":[` + gauge + `],"fetchedAt":"` + good + `","claude":{"lastSuccessAt":"` + peerStamp(now.Add(10*time.Minute)) + `"}`), claudePeerInvalid},
 		{"other source", "home", card(`"gauges":[` + gauge + `],"fetchedAt":"` + good + `","claude":{"sourceMachine":"air"}`), claudePeerIdentity},
 		{"unknown status", "home", card(`"gauges":[` + gauge + `],"fetchedAt":"` + good + `","claude":{"status":"Bearer abc"}`), claudePeerInvalid},
 		{"chained import", "home", card(`"gauges":[` + gauge + `],"fetchedAt":"` + good + `","claude":{"sourceMachine":"home","peerStatus":"ok"}`), claudePeerInvalid},
@@ -141,6 +142,8 @@ func TestClaudePeerRefusesUnsafeOrUntruthfulReadings(t *testing.T) {
 		{"string percent", "home", card(`"gauges":[{"label":"5h","usedPercent":"5"}],"fetchedAt":"` + good + `"`), claudePeerInvalid},
 		{"invalid reset", "home", card(`"gauges":[{"label":"5h","usedPercent":5,"resetAt":"soon"}],"fetchedAt":"` + good + `"`), claudePeerInvalid},
 		{"empty label", "home", card(`"gauges":[{"label":" ","usedPercent":5}],"fetchedAt":"` + good + `"`), claudePeerInvalid},
+		{"empty window", "home", card(`"gauges":[{"label":"5h"}],"fetchedAt":"` + good + `"`), claudePeerInvalid},
+		{"projection without observation", "home", card(`"gauges":[{"label":"5h","projectedEnd":7}],"fetchedAt":"` + good + `"`), claudePeerInvalid},
 		{"control label", "home", card(`"gauges":[{"label":"a\nb","usedPercent":5}],"fetchedAt":"` + good + `"`), claudePeerInvalid},
 		{"negative window", "home", card(`"gauges":[{"label":"5h","usedPercent":5,"windowSeconds":-1}],"fetchedAt":"` + good + `"`), claudePeerInvalid},
 		{"nothing reported", "home", card(`"fetchedAt":"` + good + `"`), claudePeerInvalid},
@@ -258,6 +261,25 @@ func TestClaudePeerRetentionKeepsAgeAttemptAndRecovery(t *testing.T) {
 	good := claudeCard(t, store)
 	if good.Error != "" || *good.Gauges[0].UsedPercent != 8 || !good.FetchedAt.Equal(recovered.UTC()) || good.Claude.PeerStatus != claudePeerOK || !good.Claude.LastSuccessAt.Equal(good.FetchedAt) {
 		t.Fatalf("recovery=%+v %+v", good, good.Claude)
+	}
+}
+
+func TestClaudePeerMalformedWindowKeepsPreviousReadingAndSuccessTimes(t *testing.T) {
+	fixture := &peerFixture{machine: "home", card: legacyPeerCard(time.Now().Add(-time.Minute), 5)}
+	server := httptest.NewServer(fixture)
+	defer server.Close()
+	f, provider := peerFetcher(t, server.URL+"/usage")
+	store := NewStore(f, "mini", time.Minute)
+	store.refresh(context.Background())
+	before := claudeCard(t, store)
+	fixture.set(0, fmt.Sprintf(`{"key":"claude","kind":"quota","gauges":[{"label":"5h"}],"fetchedAt":%q}`, peerStamp(time.Now())))
+	store.refresh(context.Background())
+	after := claudeCard(t, store)
+	if after.Error == "" || after.Claude.PeerStatus != claudePeerInvalid || len(after.Gauges) != 2 ||
+		*after.Gauges[0].UsedPercent != 5 || !after.FetchedAt.Equal(before.FetchedAt) ||
+		!after.Claude.LastSuccessAt.Equal(before.Claude.LastSuccessAt) ||
+		!after.Claude.PeerLastSuccessAt.Equal(before.Claude.PeerLastSuccessAt) || provider.Load() != 0 {
+		t.Fatalf("malformed reading replaced quota or advanced success: before=%+v after=%+v provenance=%+v", before, after, after.Claude)
 	}
 }
 
