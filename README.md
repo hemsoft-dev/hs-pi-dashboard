@@ -826,6 +826,16 @@ SHA pins and same-line `# vX.Y.Z` comments, which
 [the action pin guard](scripts/check-action-pins.sh) verifies against upstream
 tags. Update PRs must pass the existing CI and review gates before merge.
 
+[CodeQL](.github/workflows/codeql.yml) analyzes the Go, JavaScript/TypeScript,
+Python and GitHub Actions code on every pull request and every push to `main`
+with GitHub's default query suite. Its alerts appear on the pull request and
+under Code scanning on the repository security page. The CodeQL jobs are
+advisory: the [`main` ruleset](.github/rulesets/main.json) requires only
+`verify`, so an alert does not block a merge by itself. Check a pull request's
+code-scanning results before merging, and fix each alert or dismiss it with a
+written reason. The Go analysis builds on Linux, so its database may omit files
+limited to other systems by name (`*_windows.go`, `*_darwin.go`).
+
 ## Roadmap
 
 - [ ] v2: pi extension reporting live turn/tool events from running sessions
