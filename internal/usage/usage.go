@@ -97,6 +97,7 @@ type Fetcher struct {
 	githubCacheMu   sync.Mutex
 	githubCache     map[string]billingCacheEntry
 	agyRun          func(context.Context) ([]byte, error)
+	vaultRead       func() string
 	githubRun       billingRunner
 	githubRateMu    sync.Mutex
 	githubRateUntil map[string]time.Time
@@ -680,13 +681,20 @@ func (f *Fetcher) fileAntigravityCreds() *agCreds {
 	return credsFromMap(tok, "file")
 }
 
+// ReadAntigravityVault is the vault reader a Fetcher uses when its vaultRead
+// is nil: Windows Credential Manager. It is exported only so that the TestMain
+// of every package whose tests fetch usage can replace it, so no test reads
+// the host's credential. Production code must leave it alone.
+var ReadAntigravityVault = credManagerAntigravity
+
 // vaultAntigravityCreds reads the Antigravity CLI session from Windows
 // Credential Manager (same approach as the statusline extension).
 func (f *Fetcher) vaultAntigravityCreds() *agCreds {
-	if runtime.GOOS != "windows" {
-		return nil
+	read := f.vaultRead
+	if read == nil {
+		read = ReadAntigravityVault
 	}
-	out := credManagerAntigravity()
+	out := read()
 	if out == "" {
 		return nil
 	}
@@ -723,10 +731,9 @@ func credsFromMap(m map[string]any, source string) *agCreds {
 	return c
 }
 
-// credManagerAntigravity reads the CLI's "gemini:antigravity" credential blob
+// credManagerScript prints the CLI's "gemini:antigravity" credential blob
 // from Windows Credential Manager (same approach as the statusline).
-func credManagerAntigravity() string {
-	script := `
+const credManagerScript = `
 Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
@@ -753,7 +760,14 @@ $bytes = New-Object byte[] $cred.CredentialBlobSize
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
 [Console]::Out.Write([Text.Encoding]::UTF8.GetString($bytes))
 `
-	out, err := credentialCommand(script).Output()
+
+// credManagerAntigravity returns the CLI's "gemini:antigravity" credential
+// blob, or "" when there is none or the host is not Windows.
+func credManagerAntigravity() string {
+	if runtime.GOOS != "windows" {
+		return ""
+	}
+	out, err := credentialCommand(credManagerScript).Output()
 	if err != nil {
 		return ""
 	}
