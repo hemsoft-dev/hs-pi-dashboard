@@ -237,38 +237,44 @@ func TestPlanRunReportsCycleErrors(t *testing.T) {
 	}
 }
 
-// Warm-up repeats while a block still adds handles, up to MaxWarmup, and
-// stops at the first block that adds none.
+// Warm-up repeats while a block still adds handles or OS threads, up to
+// MaxWarmup, and stops at the first block that adds neither. The warm-up
+// readings are scripted: with real ones, a thread the runtime started on its
+// own during the first flat block made 10 cycles of the expected 8.
 func TestPlanWarmupWaitsForPoolsToFill(t *testing.T) {
-	if Measure().Handles == Unmeasured {
-		t.Skipf("handles unmeasured on %s", runtime.GOOS)
-	}
-	var files []*os.File
-	defer func() {
-		for _, f := range files {
-			f.Close()
-		}
-	}()
-	open := func(limit int) func(bool) error {
-		return func(measured bool) error {
-			if measured || len(files) >= limit {
-				return nil
-			}
-			f, err := os.Open(os.Args[0])
-			files = append(files, f)
-			return err
-		}
-	}
+	defer func(real func() Reading) { warmupMeasure = real }(warmupMeasure)
 	loose := Bounds{Goroutines: 100, Threads: 100, HeapBytes: 1 << 30, Handles: 100, Children: 100}
-	// Growth for 3 blocks, then flat: 4 blocks of warm-up.
-	result, err := Plan{Warmup: 2, MaxWarmup: 20, Cycles: 1, Bounds: loose}.Run(open(6))
-	if err != nil || result.WarmupCycles != 8 {
-		t.Fatalf("warm-up %d cycles, err=%v", result.WarmupCycles, err)
-	}
-	// Growth that never stops ends at MaxWarmup.
-	result, err = Plan{Warmup: 2, MaxWarmup: 6, Cycles: 1, Bounds: loose}.Run(open(1000))
-	if err != nil || result.WarmupCycles != 6 {
-		t.Fatalf("warm-up %d cycles, err=%v", result.WarmupCycles, err)
+	for _, tc := range []struct {
+		name         string
+		maxWarmup    int
+		handleCycles int // the first warm-up cycles each open a handle
+		threadCycle  int // the warm-up cycle that starts an OS thread, or 0
+		want         int
+	}{
+		{"handles grow for 3 blocks", 20, 6, 0, 8},
+		{"a thread starts in the first flat block", 20, 6, 7, 10},
+		{"growth that never stops ends at MaxWarmup", 6, 1000, 0, 6},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			reading := Reading{Goroutines: 2, Threads: 8, HeapBytes: 1 << 20, Handles: 8}
+			warmupMeasure = func() Reading { return reading }
+			warmups := 0
+			result, err := Plan{Warmup: 2, MaxWarmup: tc.maxWarmup, Cycles: 1, Bounds: loose}.Run(func(measured bool) error {
+				if !measured {
+					warmups++
+					if warmups <= tc.handleCycles {
+						reading.Handles++
+					}
+					if warmups == tc.threadCycle {
+						reading.Threads++
+					}
+				}
+				return nil
+			})
+			if err != nil || result.WarmupCycles != tc.want || warmups != tc.want {
+				t.Fatalf("warm-up %d cycles (%d run), want %d, err=%v", result.WarmupCycles, warmups, tc.want, err)
+			}
+		})
 	}
 }
 
