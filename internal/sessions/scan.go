@@ -119,6 +119,8 @@ type Snapshot struct {
 }
 
 type fileState struct {
+	// size is the byte offset already read and applied, which can be past
+	// the size os.Stat reported when the file grew during the read.
 	size    int64
 	summary *Summary
 	partial []byte
@@ -130,6 +132,7 @@ type Scanner struct {
 	dir          string
 	activeWindow time.Duration
 	now          func() time.Time
+	open         func(string) (*os.File, error) // tests append between Stat and read
 	isClaude     bool
 
 	mu    sync.Mutex
@@ -149,6 +152,7 @@ func NewScanner(dir string, activeWindow time.Duration) *Scanner {
 		dir:          dir,
 		activeWindow: activeWindow,
 		now:          time.Now,
+		open:         os.Open,
 		files:        map[string]*fileState{},
 	}
 }
@@ -332,7 +336,7 @@ func (s *Scanner) pollFile(path string, now time.Time) Summary {
 		return *state.summary
 	}
 
-	f, err := os.Open(path)
+	f, err := s.open(path)
 	if err != nil {
 		return *state.summary
 	}
@@ -347,7 +351,10 @@ func (s *Scanner) pollFile(path string, now time.Time) Summary {
 		return *state.summary
 	}
 
-	state.size = info.Size()
+	// ReadAll stops at the current EOF, which moves past info.Size() when
+	// the file grows after Stat. Advance by what was read, or the next poll
+	// would apply those bytes again.
+	state.size += int64(len(data))
 	lines := append(state.partial, data...)
 	state.partial = nil
 	for len(lines) > 0 {
