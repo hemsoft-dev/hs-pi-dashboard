@@ -23,6 +23,8 @@ import (
 type runtimeFixture struct {
 	threads           []liveThread
 	archived          []liveThread
+	rawThreads        []any // V2 shell rows sent as given, so null and absent fields differ
+	rawArchived       []any
 	v2                bool
 	padding           string
 	declaredLength    int64
@@ -61,11 +63,17 @@ func attachRuntime(t *testing.T, c *Collector) (*runtimeFixture, *httptest.Serve
 					if req.Header.Get("x-t3-orchestration-protocol") != "2" {
 						t.Error("missing V2 protocol header")
 					}
-					archived := f.archived
-					if archived == nil {
+					var threads, archived any = f.threads, f.archived
+					if f.archived == nil {
 						archived = []liveThread{}
 					}
-					json.NewEncoder(w).Encode(map[string]any{"threads": f.threads, "archivedThreads": archived, "ignoredPreview": f.padding})
+					if f.rawThreads != nil {
+						threads = f.rawThreads
+					}
+					if f.rawArchived != nil {
+						archived = f.rawArchived
+					}
+					json.NewEncoder(w).Encode(map[string]any{"threads": threads, "archivedThreads": archived, "ignoredPreview": f.padding})
 				} else {
 					json.NewEncoder(w).Encode(map[string]any{"threads": f.threads, "ignoredPreview": f.padding})
 				}

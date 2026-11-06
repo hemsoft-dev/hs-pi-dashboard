@@ -401,7 +401,10 @@ func (t liveThread) v2State() (string, bool) {
 	case "cancelled", "interrupted", "rolled_back":
 		return "stopped", false
 	}
-	if t.PendingRequest != nil {
+	// An explicit null activityRunStatus means no run is live: T3 can leave a
+	// request pending after its run ends, and nobody can answer it. Older
+	// servers omit the field, so their requests still count.
+	if t.PendingRequest != nil && (!t.activityStatusPresent || t.ActivityRunStatus != "") {
 		return "waiting", true
 	}
 	switch status {

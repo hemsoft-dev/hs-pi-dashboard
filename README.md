@@ -297,7 +297,12 @@ later poll. V2 shell responses allow up to 64 MiB of decompressed JSON, includin
 active and archived history; V1 keeps its 8 MiB limit. Larger responses are
 unavailable rather than partially counted. A V2 run waiting for checkpoint
 capture appears as working; only a pending approval or input request appears as
-waiting for the user. Explicitly configure `state.sqlite` to monitor a separate
+waiting for the user. T3 can leave a request pending after its run has ended,
+and nobody can answer it. When the shell reports `activityRunStatus: null`, no
+run is live, so the request does not make the thread waiting or active. The
+thread's state then comes from its run status and background tasks, and its
+Input or Approval label is unchanged. Servers that omit the field still count
+the request. Explicitly configure `state.sqlite` to monitor a separate
 V1 instance;
 an upgraded runtime cannot validate its frozen V1 copy as live.
 

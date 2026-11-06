@@ -113,6 +113,7 @@ func TestV2VerifiedStatesQuietWorkFailureAndRecovery(t *testing.T) {
 		v2Thread(t, db, id, now.Add(-time.Hour))
 		live := liveThread{ID: id, Status: state}
 		if id == "wait" {
+			live.ActivityRunStatus = "waiting" // the request's run is still live
 			live.PendingRequest = &struct {
 				Kind string `json:"kind"`
 			}{Kind: "user_input"}
