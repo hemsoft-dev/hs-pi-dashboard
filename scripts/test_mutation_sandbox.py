@@ -227,6 +227,7 @@ class FakeCanaries:
         return {"connections_since_baseline": baseline}
 
 
+@unittest.skipUnless(LINUX, "these tests exercise the Linux launcher boundary")
 class ProbeVerdict(unittest.TestCase):
     def run_probe(self, results, code=0, tripped=False):
         root = tmpdir(self)
@@ -328,6 +329,7 @@ class Entry(unittest.TestCase):
 
 
 
+@unittest.skipUnless(LINUX, "these tests exercise the Linux launcher boundary")
 class CommittedSource(unittest.TestCase):
     def test_only_committed_files_are_staged(self):
         root = tmpdir(self)
@@ -368,6 +370,7 @@ class CommittedSource(unittest.TestCase):
                     sb.extract_source_archive(data.getvalue(), tmpdir(self) / "dst")
 
 
+@unittest.skipUnless(LINUX, "these tests exercise the Linux launcher boundary")
 class Publication(unittest.TestCase):
     def test_incomplete_or_failed_final_proof_cannot_publish_success(self):
         for result in (None, "refused"):
@@ -398,6 +401,116 @@ class Publication(unittest.TestCase):
             for stage, when in (("download", "before"), ("mutation", "before"), ("mutation", "after"))]
         s.publish()
         self.assertIn("checks passed, host canaries untouched", s.args.summary.read_text())
+
+
+
+@unittest.skipUnless(LINUX, "publication is a Linux launcher boundary")
+class ReportBoundary(unittest.TestCase):
+    def test_sandbox_report_file_symlinks_are_never_read_or_exported(self):
+        for folder in ("mutation", "sandbox"):
+            with self.subTest(folder=folder):
+                root = tmpdir(self)
+                s = sandbox(root / "run")
+                source = s.dirs["report"] / folder
+                source.mkdir(parents=True)
+                host_only = root / "host-only-fixture"
+                host_only.write_bytes(b"synthetic host-only content")
+                (source / "escape.txt").symlink_to(host_only)
+                with self.assertRaises((sb.SandboxError, OSError)):
+                    s.publish()
+                self.assertFalse((s.args.report_dir / "escape.txt").exists())
+                self.assertFalse((s.args.report_dir / "sandbox" / "escape.txt").exists())
+
+    def test_report_directory_symlinks_are_refused(self):
+        for folder in ("mutation", "sandbox"):
+            with self.subTest(folder=folder):
+                root = tmpdir(self)
+                s = sandbox(root / "run")
+                s.dirs["report"].mkdir(parents=True)
+                outside = root / "host-only-directory"
+                outside.mkdir()
+                (outside / "escape.txt").write_bytes(b"synthetic host-only content")
+                (s.dirs["report"] / folder).symlink_to(outside, target_is_directory=True)
+                with self.assertRaises((sb.SandboxError, OSError)):
+                    s.publish()
+                self.assertFalse((s.args.report_dir / "escape.txt").exists())
+                self.assertFalse((s.args.report_dir / "sandbox" / "escape.txt").exists())
+
+    def test_regular_report_export_and_summary_still_work(self):
+        s = sandbox(tmpdir(self) / "run")
+        s.args.summary = s.work.parent / "job-summary.md"
+        for folder, filename, content in (("mutation", "summary.md", "gate fixture"),
+                                           ("mutation", "survivors.md", "survivor fixture"),
+                                           ("sandbox", "probe.json", "[]")):
+            source = s.dirs["report"] / folder
+            source.mkdir(parents=True, exist_ok=True)
+            (source / filename).write_text(content)
+        s.publish()
+        self.assertEqual((s.args.report_dir / "summary.md").read_text(), "gate fixture")
+        self.assertEqual((s.args.report_dir / "sandbox" / "probe.json").read_text(), "[]")
+        self.assertIn("survivor fixture", s.args.summary.read_text())
+
+    def test_probe_result_and_output_ancestors_never_follow_symlinks(self):
+        root = tmpdir(self)
+        outside = root / "outside"
+        outside.mkdir()
+        (outside / "probe.json").write_text("synthetic host-only content")
+        link = root / "link"
+        link.symlink_to(outside, target_is_directory=True)
+        with self.assertRaises((sb.SandboxError, OSError)):
+            sb.read_report_file(link / "probe.json")
+        s = sandbox(root / "run")
+        s.args.report_dir = link / "output"
+        with self.assertRaises((sb.SandboxError, OSError)):
+            s.publish()
+        self.assertFalse((outside / "output").exists())
+
+    def test_late_unsafe_source_refuses_before_exporting_an_earlier_valid_report(self):
+        root = tmpdir(self)
+        s = sandbox(root / "run")
+        mutation = s.dirs["report"] / "mutation"
+        mutation.mkdir(parents=True)
+        (mutation / "summary.md").write_text("valid fixture")
+        probes = s.dirs["report"] / "sandbox"
+        probes.mkdir()
+        host = root / "host-fixture"
+        host.write_text("synthetic host-only content")
+        (probes / "late-link").symlink_to(host)
+        with self.assertRaises((sb.SandboxError, OSError)):
+            s.publish()
+        self.assertFalse((s.args.report_dir / "summary.md").exists())
+        evidence = json.loads((s.args.report_dir / "sandbox" / "evidence.json").read_text())
+        self.assertEqual(evidence["result"], "refused")
+
+    def test_output_file_symlink_refuses_without_overwriting_target(self):
+        root = tmpdir(self)
+        s = sandbox(root / "run")
+        source = s.dirs["report"] / "mutation"
+        source.mkdir(parents=True)
+        (source / "summary.md").write_text("valid fixture")
+        s.args.report_dir.mkdir(parents=True)
+        host = root / "host-fixture"
+        host.write_text("synthetic original")
+        (s.args.report_dir / "summary.md").symlink_to(host)
+        with self.assertRaises((sb.SandboxError, OSError)):
+            s.publish()
+        self.assertEqual(host.read_text(), "synthetic original")
+
+    def test_hardlinks_and_special_files_are_refused_without_reading_or_truncating(self):
+        root = tmpdir(self)
+        host = root / "host-fixture"
+        host.write_bytes(b"synthetic original")
+        source = root / "reports"
+        source.mkdir()
+        os.link(host, source / "hardlink")
+        with self.assertRaises((sb.SandboxError, OSError)):
+            sb.read_report_file(source / "hardlink")
+        os.mkfifo(source / "fifo")
+        with self.assertRaises((sb.SandboxError, OSError)):
+            sb.read_report_file(source / "fifo")
+        with self.assertRaises((sb.SandboxError, OSError)):
+            sb.write_report_file(source / "hardlink", b"changed")
+        self.assertEqual(host.read_bytes(), b"synthetic original")
 
 
 if __name__ == "__main__":

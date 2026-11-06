@@ -20,8 +20,8 @@ Mutants run only inside the bubblewrap sandbox of
 [scripts/mutation_sandbox.py](../scripts/mutation_sandbox.py) (see
 [Sandbox](#sandbox)). It needs Linux, bubblewrap 0.8 or newer and unprivileged
 user namespaces. The launcher copies the toolchain, the gremlins binary, the
-go.sum modules and the repository into a new work folder; nothing of the
-repository is built or tested on the host.
+go.sum modules and the repository into a new work folder; no repository Go code or mutant is built or tested on the host.
+The Python launcher and its unit tests run on the host.
 
 ```bash
 go install github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0
@@ -128,6 +128,12 @@ is recorded in `sandbox/evidence.json`. Source archive links and paths outside
 the private staging directory are refused. A final proof failure marks the
 summary UNPROVEN even when the mutation score itself passes.
 
+Report and probe-result reads use directory descriptors and `O_NOFOLLOW`
+for every ancestor and final component. Exports accept only singly linked
+regular files, reject symlinks/hardlinks/special files, and validate all sources
+before copying any report content. A refused export exits 3 and cannot publish
+a success verdict.
+
 ## Scope
 
 The scope covers every Go package of the module. Each package is either listed
@@ -223,7 +229,7 @@ required `verify` check. On the ephemeral `ubuntu-22.04` runner it builds Bubble
 with a checked archive SHA256 and no setuid installation. It installs pinned
 gremlins and the selected public Go modules, runs
 the gate and launcher unit tests, then the launcher, which proves the sandbox
-before any repository code runs. If the runner cannot create the sandbox (for
+before any repository Go code or mutant runs. If the runner cannot create the sandbox (for
 example namespace creation denied by runner policy), the job fails with
 exit 3 and runs no mutant; it never falls back to running unconfined or changes host security policy.
 The first Ubuntu 24.04 qualification failed before any mutant at isolated

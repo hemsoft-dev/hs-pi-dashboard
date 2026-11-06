@@ -68,11 +68,13 @@ import secrets
 import shutil
 import socket
 import subprocess
+import stat
 import sys
 import threading
 import tarfile
 import time
 from dataclasses import dataclass
+from contextlib import contextmanager
 from pathlib import Path, PurePosixPath
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -214,6 +216,71 @@ def archive_source(source: Path, dst: Path) -> tuple[str, int]:
     except (OSError, subprocess.SubprocessError) as err:
         raise SandboxError("cannot archive committed source HEAD; commit the intended files first") from err
     return oid, extract_source_archive(archive, dst)
+
+
+@contextmanager
+def report_directory(path: Path, create: bool = False):
+    """Walk from / using directory descriptors, never following an ancestor link."""
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    fd = os.open("/", flags)
+    try:
+        for part in Path(os.path.abspath(path)).parts[1:]:
+            if create:
+                try:
+                    os.mkdir(part, 0o700, dir_fd=fd)
+                except FileExistsError:
+                    pass
+            child = os.open(part, flags, dir_fd=fd)
+            os.close(fd)
+            fd = child
+        yield fd
+    finally:
+        os.close(fd)
+
+
+@contextmanager
+def regular_report(fd: int, name: str, write: bool = False):
+    # NONBLOCK prevents a planted FIFO from hanging publication. Check before
+    # reading or truncating; NOFOLLOW also refuses a swapped final symlink.
+    flags = os.O_NOFOLLOW | os.O_NONBLOCK | (os.O_WRONLY | os.O_CREAT if write else os.O_RDONLY)
+    opened = os.open(name, flags, 0o600, dir_fd=fd)
+    try:
+        info = os.fstat(opened)
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+            raise SandboxError(f"refusing report entry {name!r}: not a singly linked regular file")
+        yield opened
+    finally:
+        os.close(opened)
+
+
+def read_report_file(path: Path) -> bytes:
+    with report_directory(path.parent) as directory, regular_report(directory, path.name) as fd:
+        with os.fdopen(fd, "rb", closefd=False) as stream:
+            return stream.read()
+
+
+def write_report_file(path: Path, data: bytes, append: bool = False) -> None:
+    with report_directory(path.parent, create=True) as directory, regular_report(directory, path.name, write=True) as fd:
+        if append:
+            os.lseek(fd, 0, os.SEEK_END)
+        else:
+            os.ftruncate(fd, 0)
+        with os.fdopen(fd, "wb", closefd=False) as stream:
+            stream.write(data)
+
+
+def read_report_directory(path: Path) -> dict[str, bytes]:
+    """Snapshot regular files only, before exporting any sandbox-owned bytes."""
+    try:
+        with report_directory(path) as directory:
+            result = {}
+            for name in sorted(os.listdir(directory)):
+                with regular_report(directory, name) as fd:
+                    with os.fdopen(fd, "rb", closefd=False) as stream:
+                        result[name] = stream.read()
+            return result
+    except FileNotFoundError:
+        return {}  # an optional report folder was not produced
 
 
 def escape_module(path: str) -> str:
@@ -600,13 +667,14 @@ class Sandbox:
             "gremlins_module": self.tool["module"], "gremlins_version": self.tool["version"], "gremlins_sum": self.tool["sum"],
             "result": f"{S_REPORT}/sandbox/{result_name}",
         }
-        (self.dirs["report"] / "sandbox").mkdir(exist_ok=True)
+        with report_directory(self.dirs["report"] / "sandbox", create=True):
+            pass
         config_path.write_text(json.dumps(config, indent=1) + "\n", encoding="utf-8")
         baseline = canaries.counts()
         code = self.execute(f"probe-{n}-{stage}-{when}", self.argv(stage, env, ["go", "test", "-count=1", "-v", "."], S_PROBE, extra), 600)
         result_path = self.dirs["report"] / "sandbox" / result_name
         try:
-            results = json.loads(result_path.read_text(encoding="utf-8"))
+            results = json.loads(read_report_file(result_path))
         except (OSError, ValueError) as err:
             raise SandboxError(f"probe {n} ({stage}, {when}) wrote no result (go test exit {code}): {err}") from err
         names = tuple(r["name"] for r in results)
@@ -663,21 +731,25 @@ class Sandbox:
 
     def publish(self) -> None:
         report = self.args.report_dir
-        report.mkdir(parents=True, exist_ok=True)
-        mutation = self.dirs["report"] / "mutation"
-        if mutation.is_dir():
-            for path in mutation.iterdir():
-                if path.is_file():
-                    shutil.copy2(path, report / path.name)
         sandbox = report / "sandbox"
-        sandbox.mkdir(exist_ok=True)
-        for folder in (self.dirs["report"] / "sandbox", self.dirs["logs"]):
-            if folder.is_dir():
-                for path in folder.iterdir():
-                    if path.is_file():
-                        shutil.copy2(path, sandbox / path.name)
-        (sandbox / "evidence.json").write_text(json.dumps(self.evidence, indent=1, default=str) + "\n", encoding="utf-8")
-        if self.args.summary and (report / "summary.md").is_file():
+        try:
+            # Treat every file from a writable sandbox mount as untrusted,
+            # including probe output. Reject final and ancestor links before
+            # reading, and validate every source before copying any of them.
+            mutation = read_report_directory(self.dirs["report"] / "mutation")
+            probes = read_report_directory(self.dirs["report"] / "sandbox")
+            logs = read_report_directory(self.dirs["logs"])
+        except (OSError, SandboxError) as err:
+            self.evidence.update(result="refused", error=f"report publication refused: {err}")
+            write_report_file(sandbox / "evidence.json", (json.dumps(self.evidence, indent=1, default=str) + "\n").encode())
+            raise SandboxError(f"report publication refused: {err}") from err
+        for name, data in mutation.items():
+            write_report_file(report / name, data)
+        for entries in (probes, logs):
+            for name, data in entries.items():
+                write_report_file(sandbox / name, data)
+        write_report_file(sandbox / "evidence.json", (json.dumps(self.evidence, indent=1, default=str) + "\n").encode())
+        if self.args.summary and "summary.md" in mutation:
             stages = self.evidence["stages"]
             expected = [("download", "before"), ("mutation", "before"), ("mutation", "after")]
             proven = (self.evidence.get("result") in ("mutation exit 0", "mutation exit 1", "mutation exit 2")
@@ -688,10 +760,9 @@ class Sandbox:
             line = (f"Sandbox: bubblewrap {self.evidence.get('bwrap_version')}, {len(stages)} probe runs of "
                     f"{len(PROBE_CHECKS)} checks passed, host canaries untouched. See `sandbox/evidence.json`.\n"
                     if proven else "Sandbox: UNPROVEN; mutation gate results are not qualified. See `sandbox/evidence.json`.\n")
-            with self.args.summary.open("a", encoding="utf-8") as sink:
-                sink.write((report / "summary.md").read_text(encoding="utf-8") + "\n" + line + "\n")
-                if (report / "survivors.md").is_file():
-                    sink.write((report / "survivors.md").read_text(encoding="utf-8"))
+            summary = mutation["summary.md"] + b"\n" + line.encode() + b"\n"
+            summary += mutation.get("survivors.md", b"")
+            write_report_file(self.args.summary, summary, append=True)
 
 
 def parse_args(argv: list[str] | None) -> argparse.Namespace:

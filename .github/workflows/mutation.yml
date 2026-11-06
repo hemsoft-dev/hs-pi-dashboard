@@ -53,8 +53,8 @@ jobs:
         with:
           go-version-file: go.mod
 
-      # Public tools only, on the ephemeral runner. Nothing of the repository
-      # is built or tested outside the sandbox.
+      # Public tools only, on the ephemeral runner. No repository Go code or mutant
+      # is built or tested outside the sandbox; Python gate/launcher tests run on the host.
       # Ubuntu 24.04 refused isolated loopback setup (RTM_NEWADDR EPERM).
       # Keep host policy intact: use 22.04 and build the public, pinned tool
       # as the runner user. No setuid install or host security policy changes.
