@@ -180,3 +180,46 @@ func TestMergeSnapshotsRetainsAllActiveAndCapsCombinedHistory(t *testing.T) {
 		}
 	}
 }
+
+// Only real conversation records count. Each excluded record would move the
+// first prompt, the session's start or last activity, the message count or the
+// output if it were accepted; the kept records prove the filter is not too wide.
+func TestClaudeEntryFiltersKeepOnlyConversationRecords(t *testing.T) {
+	record := func(typ, uuid, ts, extra, message string) string {
+		return fmt.Sprintf(`{"type":%q,"sessionId":"shared","uuid":%q,"cwd":"/repo/dashboard","timestamp":"2026-09-30T%sZ"%s,"message":%s}`, typ, uuid, ts, extra, message)
+	}
+	assistant := func(id, text string, output int) string {
+		return fmt.Sprintf(`{"id":%q,"role":"assistant","model":"claude-opus-4-6","content":[{"type":"text","text":%q}],"usage":{"input_tokens":1,"output_tokens":%d}}`, id, text, output)
+	}
+	scanner, _ := claudeScanner(t,
+		// Excluded: a meta user record, before the real prompt.
+		record("user", "meta-user", "11:58:00", `,"isMeta":true`, `{"role":"user","content":"meta prompt"}`),
+		// Excluded: a user record without a UUID, even with a message id.
+		record("user", "", "11:59:00", "", `{"id":"user-msg","role":"user","content":"prompt without uuid"}`),
+		claudePrompt,
+		// Excluded: a user record whose message role is not user.
+		record("user", "wrong-role", "12:00:20", "", `{"role":"assistant","content":"wrong role"}`),
+		// Excluded: a meta assistant record.
+		record("assistant", "meta-assistant", "12:00:40", `,"isMeta":true`, assistant("meta-msg", "meta output", 50)),
+		// Kept: an assistant record without a UUID but with a message id.
+		record("assistant", "", "12:01:00", "", assistant("kept-msg", "Kept", 7)),
+		// Kept: a system record moves the activity time without a role.
+		`{"type":"system","sessionId":"shared","uuid":"sys","timestamp":"2026-09-30T12:01:20Z"}`,
+		// Excluded: an assistant record with neither a UUID nor a message id.
+		record("assistant", "", "12:01:40", "", `{"role":"assistant","content":[{"type":"text","text":"anonymous"}],"usage":{"output_tokens":90}}`),
+	)
+	snap := scanner.Poll()
+	if len(snap.Sessions) != 1 {
+		t.Fatalf("sessions = %+v", snap.Sessions)
+	}
+	s := snap.Sessions[0]
+	if s.FirstPrompt != "Make it work" || s.MessageCount != 2 || s.InputTokens != 1 || s.OutputTokens != 7 || s.TotalTokens != 8 {
+		t.Fatalf("counted records = %+v", s)
+	}
+	if !s.StartedAt.Equal(time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC)) || !s.LastActivity.Equal(time.Date(2026, 9, 30, 12, 1, 20, 0, time.UTC)) {
+		t.Fatalf("activity span = %v to %v", s.StartedAt, s.LastActivity)
+	}
+	if len(s.Outputs) != 1 || s.Outputs[0].Text != "Kept" {
+		t.Fatalf("outputs = %+v", s.Outputs)
+	}
+}

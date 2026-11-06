@@ -1,0 +1,94 @@
+name: Mutation
+
+# Mutation testing with pinned gremlins; see docs/mutation-testing.md.
+# Runs on pull requests that change Go code or the mutation setup, every Monday
+# against main, and on demand. Mutants run only inside the bubblewrap sandbox
+# of scripts/mutation_sandbox.py, which proves the sandbox with synthetic
+# canaries first and refuses the run (exit 3) if it cannot. Fails below the
+# break threshold in scripts/mutation-gate.json or when a required-kill line
+# has a survivor.
+
+on:
+  pull_request:
+    paths:
+      - '**.go'
+      - 'go.mod'
+      - 'go.sum'
+      - 'scripts/mutation.py'
+      - 'scripts/mutation_sandbox.py'
+      - 'scripts/mutation-gate.json'
+      - 'scripts/mutation-sandbox-probe/**'
+      - 'scripts/test_mutation.py'
+      - 'scripts/test_mutation_sandbox.py'
+      - '.github/workflows/mutation.yml'
+  schedule:
+    - cron: '17 9 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mutation-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GOTOOLCHAIN: local
+
+jobs:
+  mutation:
+    name: Mutation testing
+    runs-on: ubuntu-24.04
+    # The full scope took 12 minutes on a 12-core host with 2 workers.
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      # Public tools only, on the ephemeral runner. Nothing of the repository
+      # is built or tested outside the sandbox.
+      - name: Install bubblewrap
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends bubblewrap
+          bwrap --version
+
+      - name: Install gremlins
+        run: go install github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0
+
+      - name: Download modules
+        run: go mod download
+
+      - name: Test the mutation gate and sandbox launcher
+        run: python3 -m unittest discover -s scripts -p "test_mutation*.py"
+
+      # The launcher copies the toolchain, gremlins, the go.sum modules and the
+      # repository into the work folder, proves the sandbox, then runs
+      # scripts/mutation.py inside it. Exit 3: the sandbox could not be proven.
+      - name: Run mutation testing in the proven sandbox
+        run: >-
+          python3 scripts/mutation_sandbox.py
+          --go-root "$(go env GOROOT)"
+          --gremlins "$(go env GOPATH)/bin/gremlins"
+          --module-cache "$(go env GOMODCACHE)"
+          --work "$RUNNER_TEMP/mutation-sandbox"
+          --report-dir mutation-report
+          --summary "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload mutation report
+        # Also after a tool or sandbox error, when only logs and probe results exist.
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: mutation-report
+          path: mutation-report/
+          if-no-files-found: ignore
+          retention-days: 30

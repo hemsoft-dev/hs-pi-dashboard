@@ -808,6 +808,29 @@ negative controls. [resource-growth.yml](.github/workflows/resource-growth.yml)
 runs them verbosely on pull requests, weekly on Mondays at 09:17 UTC with
 3,000 cycles, and on demand.
 
+### Mutation testing
+
+The [Mutation workflow](.github/workflows/mutation.yml) runs pinned gremlins
+v0.6.0 against the declared Go scope, weekly and on relevant pull requests.
+It fails below 83.0% efficacy, above the timeout limit, or if a required
+boundary mutant survives. The target is 90%.
+
+Mutants run only inside a bubblewrap sandbox, with private HOME and caches,
+no host network and no real profiles or credentials. Synthetic host canaries
+and 21 in-sandbox checks prove confinement before and after the run; failure
+stops the job. Only committed HEAD is staged, so commit intended changes first.
+See [docs/mutation-testing.md](docs/mutation-testing.md) for setup, scope,
+measured results and report interpretation. On Linux with the public tools
+and modules already installed:
+
+```sh
+mutation_work="$(mktemp -d)"
+python3 scripts/mutation_sandbox.py --go-root "$(go env GOROOT)" \
+  --gremlins "$(go env GOPATH)/bin/gremlins" \
+  --module-cache "$(go env GOMODCACHE)" --work "$mutation_work/run" \
+  --report-dir mutation-report
+```
+
 ## Run
 
 ### Agent (every machine with pi)
