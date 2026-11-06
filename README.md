@@ -724,6 +724,49 @@ python deploy/build_fleet.py --target linux-amd64
 python -m unittest discover -s deploy -p test_build_fleet.py
 ```
 
+### Coverage and CRAP
+
+The Linux and Windows legs also write a statement coverage profile and run
+[scripts/crap_gate.py](scripts/crap_gate.py). It joins `go tool cover -func`
+with pinned gocyclo v0.6.0 complexity for every non-test function built on that
+platform and computes CRAP = complexity² × (1 − coverage)³ + complexity. Go
+reports statement coverage only, so the score uses statement coverage, not
+branch coverage. The job summary shows per-package coverage and the 20 worst
+functions; the `coverage-crap-Linux` and `coverage-crap-Windows` artifacts hold
+the profile, the summary and every function's complexity, coverage and CRAP.
+
+[scripts/crap-gate.json](scripts/crap-gate.json) declares the thresholds, and
+the step fails when:
+
+- total statement coverage falls below the platform's floor, set half a point
+  under the value measured when the gate was added (Linux 83.0% from 83.5%,
+  Windows 82.5% from 83.0%);
+- a function scores above CRAP 30 without a checked-in exception that gives a
+  reason and a ceiling for that platform, which covers any new or changed
+  function that crosses 30;
+- a function with an exception scores above its ceiling, or the platform's
+  worst score rises above its declared baseline (Linux 72.0 from
+  `credsFromMap`, Windows 210.0 from the untested Windows
+  `verifyRuntimeProcess`);
+- an exception names a function that no longer exists.
+
+The exceptions record the functions above 30 at the baseline with their
+measured scores: 14 on Linux, the same 14 plus two Windows-only ones on Windows.
+They need no rewrite, but any change that lowers their
+coverage or raises their complexity fails. When a function improves, the step
+prints a notice; lower or remove its ceiling in the same change. Run the gate
+locally on Linux with pinned gocyclo installed:
+
+```bash
+go install github.com/fzipp/gocyclo/cmd/gocyclo@v0.6.0
+go test -race -p 1 -covermode=atomic -coverprofile=cover.out ./...
+python3 scripts/crap_gate.py --platform linux --profile cover.out
+# Print measured values to refresh crap-gate.json after a deliberate change:
+python3 scripts/crap_gate.py --platform linux --profile cover.out --suggest
+# Test the gate, including samples it must reject:
+python3 -m unittest discover -s scripts -p "test_*.py"
+```
+
 ## Run
 
 ### Agent (every machine with pi)
