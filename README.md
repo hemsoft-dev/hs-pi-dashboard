@@ -693,6 +693,33 @@ go build ./...
 go test ./...
 ```
 
+### Accessibility check
+
+`scripts/accessibility-check.cjs` runs axe-core against the synthetic fixture
+in `mismatch` and `failed-free` states at 1280×900 and 390×844 after expanding
+collapsed sections. It checks real Tab focus and Enter activation for the
+Pulse toggle and footer link. Install the pinned tools outside the repository:
+
+```bash
+a11y_tools="$(mktemp -d)"
+npm install --prefix "$a11y_tools" playwright@1.64.1 axe-core@4.13.0
+"$a11y_tools/node_modules/.bin/playwright" install --only-shell chromium
+NODE_PATH="$a11y_tools/node_modules" node scripts/accessibility-check.cjs \
+  --json accessibility-report/report.json --screenshot-dir accessibility-report
+```
+
+The command exits 1 for axe violations or keyboard failures and 2 if the scan
+cannot complete. Incomplete axe results remain listed for manual review.
+The [Accessibility workflow](.github/workflows/accessibility.yml) runs on
+pull requests and pushes to `main`, and uploads the report and screenshots.
+The three decorative chevrons are hidden from the accessibility tree. The
+short Pulse count is meaningful text: its green on the opaque dark readout
+has 15.32:1 contrast; the label has 13.61:1. The opaque background prevents the
+animated trace from reducing that contrast. Recheck these dispositions if
+those elements, colors or layers change.
+
+### Platform checks
+
 CI builds, vets, staticchecks and tests natively on Windows, Linux and macOS
 arm64. Linux runs the full Go suite with the race detector, including its
 process-verification tests. Every platform also runs pinned govulncheck v1.9.0
