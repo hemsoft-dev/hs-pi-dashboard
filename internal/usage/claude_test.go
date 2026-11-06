@@ -318,6 +318,12 @@ func TestClaudeCacheKeepsReadingAgeAcrossFailuresAndRecovers(t *testing.T) {
 	if initial.Error != "" || len(initial.Gauges) != 1 || *initial.Gauges[0].UsedPercent != 35 {
 		t.Fatalf("initial=%+v", initial)
 	}
+	// Give the cached reading a controlled age. Immediate fetches can share
+	// a Windows clock tick, so elapsed wall time cannot prove recovery.
+	initial.FetchedAt = time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	initial.Claude.LastAttemptAt = initial.FetchedAt
+	initial.Claude.LastSuccessAt = initial.FetchedAt
+	store.snapshot.Cards = []Card{initial}
 	mode = 1
 	for range 2 {
 		store.refresh(context.Background())
