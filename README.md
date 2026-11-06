@@ -745,13 +745,14 @@ the step fails when:
   reason and a ceiling for that platform, which covers any new or changed
   function that crosses 30;
 - a function with an exception scores above its ceiling, or the platform's
-  worst score rises above its declared baseline (Linux 72.0 from
-  `credsFromMap`, Windows 210.0 from the untested Windows
-  `verifyRuntimeProcess`);
+  worst score rises above its declared baseline (72.0 from `credsFromMap` on
+  both platforms);
 - an exception names a function that no longer exists.
 
 The exceptions record the functions above 30 at the baseline with their
-measured scores: 14 on Linux, the same 14 plus two Windows-only ones on Windows.
+measured scores: the same 14 on Linux and Windows. Windows tests for
+`verifyRuntimeProcess` and `runtimePort` (#97) removed their Windows-only
+exceptions and lowered the Windows baseline from 210.0.
 They need no rewrite, but any change that lowers their
 coverage or raises their complexity fails. When a function improves, the step
 prints a notice; lower or remove its ceiling in the same change. Run the gate
