@@ -4,19 +4,14 @@
   "platforms": {
     "linux": {
       "coverage_floor": 83.0,
-      "worst_crap": 72.0
+      "worst_crap": 56.0
     },
     "windows": {
       "coverage_floor": 82.5,
-      "worst_crap": 72.0
+      "worst_crap": 56.0
     }
   },
   "exceptions": [
-    {
-      "function": "internal/usage/usage.go:credsFromMap",
-      "reason": "Baseline hotspot from #88: Antigravity credential parsing (token, refresh token, expiry) has no direct test yet; the ceiling stops it getting worse.",
-      "max_crap": {"linux": 72.0, "windows": 72.0}
-    },
     {
       "function": "internal/fleet/server.go:(*Server).Run",
       "reason": "Baseline hotspot from #88: starts the poll tickers and blocks in ListenAndServe; only the running service exercises it.",

@@ -12,10 +12,12 @@ import (
 	"time"
 )
 
-// Package tests must never run a real provider CLI. Tests that need the
-// command path set their own binary.
+// Package tests must never run a real provider CLI or read a host credential.
+// Tests that need the command path set their own binary, and tests that need
+// a vault entry give their Fetcher a fixture reader.
 func TestMain(m *testing.M) {
 	os.Setenv("HS_PI_DASHBOARD_MUSE_BIN", filepath.Join(os.TempDir(), "hs-pi-dashboard-no-muse-in-tests"))
+	installHostVaultGuard()
 	os.Exit(m.Run())
 }
 
