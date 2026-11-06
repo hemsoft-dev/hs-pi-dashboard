@@ -191,11 +191,15 @@ type Result struct {
 	Elapsed         time.Duration // measured cycles only
 }
 
+// warmupMeasure takes the readings that decide whether warm-up goes on. Tests
+// script it: the Go runtime starts OS threads of its own at any time.
+var warmupMeasure = Measure
+
 // Run calls cycle for every warm-up and measured cycle, telling it which, and
 // stops at the first error.
 func (p Plan) Run(cycle func(measured bool) error) (Result, error) {
 	var result Result
-	before := Measure()
+	before := warmupMeasure()
 	for {
 		for i := 0; i < p.Warmup; i++ {
 			if err := cycle(false); err != nil {
@@ -203,7 +207,7 @@ func (p Plan) Run(cycle func(measured bool) error) (Result, error) {
 			}
 			result.WarmupCycles++
 		}
-		after := Measure()
+		after := warmupMeasure()
 		if !poolsGrew(before, after) || result.WarmupCycles+p.Warmup > p.MaxWarmup {
 			break
 		}
