@@ -57,6 +57,21 @@ func legacyPeerCard(fetched time.Time, used int) string {
 
 func noCLI(context.Context) ([]byte, error) { return nil, errors.New("not installed") }
 
+// waitForClockAfter returns once time.Now reads later than at. Windows moves
+// time.Now only at its timer tick (up to 15.6 ms), so two fetches a few
+// milliseconds apart can carry the same stamp; the next attempt is provably
+// later only once the clock has passed the earlier one.
+func waitForClockAfter(t *testing.T, at time.Time) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for !time.Now().After(at) {
+		if time.Now().After(deadline) {
+			t.Fatalf("clock did not pass %v within 1s", at)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
 // A Fetcher whose Claude credentials and provider endpoint must never be used.
 func peerFetcher(t *testing.T, url string) (*Fetcher, *atomic.Int64) {
 	t.Helper()
@@ -228,6 +243,7 @@ func TestClaudePeerRetentionKeepsAgeAttemptAndRecovery(t *testing.T) {
 	}
 
 	// Peer outage: the reading keeps its age, the attempt moves, success does not.
+	waitForClockAfter(t, initial.Claude.PeerLastAttemptAt)
 	fixture.set(http.StatusBadGateway, "")
 	store.refresh(context.Background())
 	failed := claudeCard(t, store)
