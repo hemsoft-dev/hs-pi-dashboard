@@ -769,6 +769,17 @@ python3 scripts/crap_gate.py --platform linux --profile cover.out --suggest
 python3 -m unittest discover -s scripts -p "test_*.py"
 ```
 
+### Resource growth
+
+`go test ./...` includes steady-state checks that run hundreds of agent
+collection cycles and fleet polls against fake providers and CLIs. After
+warm-up and GC, they check goroutines, OS threads, live heap, open handles
+and child processes against documented bounds.
+[docs/resource-growth.md](docs/resource-growth.md) explains the bounds and
+negative controls. [resource-growth.yml](.github/workflows/resource-growth.yml)
+runs them verbosely on pull requests, weekly on Mondays at 09:17 UTC with
+3,000 cycles, and on demand.
+
 ## Run
 
 ### Agent (every machine with pi)

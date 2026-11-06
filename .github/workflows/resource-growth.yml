@@ -1,0 +1,77 @@
+name: Resource growth
+
+# The steady-state resource checks (docs/resource-growth.md) on their own, so
+# each run's job summary shows the baseline and final readings. CI's
+# `go test ./...` already runs the same tests on every pull request and gates
+# `verify`; this workflow adds the readings, a weekly long run and a manual
+# run with more cycles.
+
+on:
+  pull_request:
+    paths:
+      - 'internal/**'
+      - 'go.mod'
+      - 'go.sum'
+      - 'docs/resource-growth.md'
+      - '.github/workflows/resource-growth.yml'
+  push:
+    branches:
+      - main
+  schedule:
+    # Mondays 09:17 UTC: ten times the default cycles.
+    - cron: '17 9 * * 1'
+  workflow_dispatch:
+    inputs:
+      cycles:
+        description: Measured cycles per check, at least 1000
+        required: false
+        default: '3000'
+
+permissions:
+  contents: read
+
+env:
+  GOTOOLCHAIN: local
+
+jobs:
+  growth:
+    name: Resource growth (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      # Empty runs the defaults: 300 agent and 1000 fleet cycles.
+      - name: Run steady-state checks
+        shell: bash
+        env:
+          HS_PI_DASHBOARD_GROWTH_CYCLES: ${{ github.event_name == 'schedule' && '3000' || inputs.cycles || '' }}
+        run: |
+          set -o pipefail
+          go test ./internal/resourcecheck ./internal/agent ./internal/fleet \
+            -run 'ResourceGrowth|Settle|Measure|Violations|HandlesPerThread|PlanRun|PlanWarmup|ParentPID' \
+            -count=1 -v 2>&1 | tee growth.log
+
+      - name: Summarize readings
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          {
+            echo "### Resource growth (${{ runner.os }}, ${HS_PI_DASHBOARD_GROWTH_CYCLES:-default} cycles)"
+            echo '```'
+            grep -E 'measured cycles|baseline:|final: |not steady|reported:|^(--- |ok|FAIL)' growth.log || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+        env:
+          HS_PI_DASHBOARD_GROWTH_CYCLES: ${{ github.event_name == 'schedule' && '3000' || inputs.cycles || '' }}
