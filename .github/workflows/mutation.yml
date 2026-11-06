@@ -38,7 +38,7 @@ env:
 jobs:
   mutation:
     name: Mutation testing
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-22.04
     # The full scope took 12 minutes on a 12-core host with 2 workers.
     timeout-minutes: 60
 
@@ -55,11 +55,23 @@ jobs:
 
       # Public tools only, on the ephemeral runner. Nothing of the repository
       # is built or tested outside the sandbox.
-      - name: Install bubblewrap
+      # Ubuntu 24.04 refused isolated loopback setup (RTM_NEWADDR EPERM).
+      # Keep host policy intact: use 22.04 and build the public, pinned tool
+      # as the runner user. No setuid install or host security policy changes.
+      - name: Build pinned bubblewrap
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends bubblewrap
-          bwrap --version
+          sudo apt-get install -y --no-install-recommends gcc libc6-dev pkg-config libcap-dev meson ninja-build
+          curl --fail --location --retry 3 \
+            https://github.com/containers/bubblewrap/archive/124c4cdf4321f63ef17a1cb0ce8f9dd45bd7adbe.tar.gz \
+            --output "$RUNNER_TEMP/bubblewrap.tar.gz"
+          echo "35971fc90453da97894535c245464c78f33846c2d786eacbee20e02f41769704  $RUNNER_TEMP/bubblewrap.tar.gz" | sha256sum --check
+          mkdir "$RUNNER_TEMP/bubblewrap-src"
+          tar -xzf "$RUNNER_TEMP/bubblewrap.tar.gz" --strip-components=1 -C "$RUNNER_TEMP/bubblewrap-src"
+          meson setup "$RUNNER_TEMP/bubblewrap-build" "$RUNNER_TEMP/bubblewrap-src" \
+            -Dman=disabled -Dtests=false -Dbash_completion=disabled -Dzsh_completion=disabled
+          meson compile -C "$RUNNER_TEMP/bubblewrap-build"
+          "$RUNNER_TEMP/bubblewrap-build/bwrap" --version
 
       - name: Install gremlins
         run: go install github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0
@@ -76,6 +88,7 @@ jobs:
       - name: Run mutation testing in the proven sandbox
         run: >-
           python3 scripts/mutation_sandbox.py
+          --bwrap "$RUNNER_TEMP/bubblewrap-build/bwrap"
           --go-root "$(go env GOROOT)"
           --gremlins "$(go env GOPATH)/bin/gremlins"
           --module-cache "$(go env GOMODCACHE)"

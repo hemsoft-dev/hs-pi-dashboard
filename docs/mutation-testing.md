@@ -176,8 +176,8 @@ value passes. The threshold applies to the total of whatever packages ran, so a
 required kills and timeouts are judged the same way in both. The break value sits under the 83.63% that the full scope
 measured when the gate was added (see below), leaving room for mutants that
 alternate between killed and timed out on a busy runner. The target is the level
-to work toward; it doesn't fail the job. When tests improve, raise the break
-threshold in the same change.
+to work toward; it doesn't fail the job. Raise the break threshold as sustained test improvements establish a higher
+floor; do not lower it to make a failing run pass.
 
 Timed-out mutants leave the denominator, so many of them could hide survivors.
 The job also fails when more than 10% (`max_timed_out_share`) of a package's
@@ -218,12 +218,18 @@ prompt, the activity span, the message count or the output if it were accepted.
 [.github/workflows/mutation.yml](../.github/workflows/mutation.yml) runs on
 pull requests that change Go code, `go.mod`, `go.sum` or the mutation setup,
 every Monday at 09:17 UTC against `main`, and on demand. It is not part of the
-required `verify` check. On the ephemeral `ubuntu-24.04` runner it installs only
-public tools (bubblewrap from apt, pinned gremlins, the go.sum modules), runs
+required `verify` check. On the ephemeral `ubuntu-22.04` runner it builds Bubblewrap 0.11.1 from
+[upstream commit `124c4cdf`](https://github.com/containers/bubblewrap/commit/124c4cdf4321f63ef17a1cb0ce8f9dd45bd7adbe)
+with a checked archive SHA256 and no setuid installation. It installs pinned
+gremlins and the selected public Go modules, runs
 the gate and launcher unit tests, then the launcher, which proves the sandbox
 before any repository code runs. If the runner cannot create the sandbox (for
-example unprivileged user namespaces restricted by AppArmor), the job fails with
-exit 3 and runs no mutant; it never falls back to running unconfined. It writes
+example namespace creation denied by runner policy), the job fails with
+exit 3 and runs no mutant; it never falls back to running unconfined or changes host security policy.
+The first Ubuntu 24.04 qualification failed before any mutant at isolated
+loopback setup (`RTM_NEWADDR: Operation not permitted`); Ubuntu 22.04 is
+qualified by the same probes rather than by assuming what that error means.
+It writes
 the summary table, failures, the full survivor list and the sandbox verdict to
 the job summary and uploads the `mutation-report` artifact for 30 days.
 
@@ -252,7 +258,10 @@ and INVERT_NEGATIVES drops a unary minus.
 
 ## Measured results
 
-Measured on 2026-11-06 inside the sandbox on Linux amd64 (kernel 7.0,
+### Initial full-scope measurement
+
+Before the additional projection and subscription-price boundary tests,
+measured on 2026-11-06 inside the sandbox on Linux amd64 (kernel 7.0,
 bubblewrap 0.11.1, 12 cores, shared host), with Go 1.27.3, gremlins v0.6.0 and
 2 workers, against `main` at `82e3b72` plus the #92 tests. All three probes
 passed and the host canaries saw no connection and no `t3` run. The mutation
@@ -277,9 +286,10 @@ limit (the highest, `internal/resourcecheck`, was 3.2%). The nine packages
 measured before `internal/resourcecheck` existed give exactly the counts of the
 earlier throwaway-HOME run (858 killed, 168 lived, 8 timed out, 83.63%);
 `internal/resourcecheck` brings the total to 83.24%, still above the 83.0% break
-threshold, which stays where it was set. In a run of `internal/usage` and
-`internal/agent` alone the total is 82.18%, below the threshold, with all their
-required kills passing.
+threshold, which stays where it was set. The initial `internal/usage` plus `internal/agent` run was 82.18%, below
+the threshold despite passing required kills. That did not satisfy #92's
+focused validation criterion, so projection and subscription-price tests were
+added; the new focused result is below.
 
 The steady-state checks make `internal/agent` the slowest package per mutant
 (an 18.8-second first run, so a 188-second deadline per mutant), but it has only
@@ -301,3 +311,22 @@ The audit sample in #92 reported `internal/hermes` at 33 killed, 0 lived and 24
 timed out (100%). Its code is unchanged since that revision; with test caching
 off it measures 42 killed, 15 lived and none timed out, so 15 of those 24
 timeouts were survivors.
+
+### Focused validation after boundary-test improvements
+
+A fresh confined run at source `fee834a8` (the same Go code and tests as the
+subsequent launcher/workflow repairs) measured:
+
+| Package | Killed | Lived | Timed out | Not covered | Efficacy |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `internal/usage` | 529 | 81 | 5 | 84 | 86.72% |
+| `internal/agent` | 11 | 7 | 0 | 5 | 61.11% |
+| **Total** | **540** | **88** | **5** | **89** | **85.99%** |
+
+The focused command exits 0 above the unchanged 83.0% break threshold.
+Every required kill in those packages was KILLED. All three 21-check probes
+passed, with zero host-canary connections or fake `t3` executions. The mutation
+step took 720 seconds. The added tests pin Monday reset tolerance, UTC
+conversion, the two-minute projection minimum, and finite positive current and
+next-period subscription prices. Hosted CI publishes the current full-scope
+measurement; these local results do not substitute for that qualification.
