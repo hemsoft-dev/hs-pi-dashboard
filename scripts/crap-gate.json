@@ -7,11 +7,21 @@
       "worst_crap": 72.0
     },
     "windows": {
-      "coverage_floor": 70.0,
-      "worst_crap": 72.0
+      "coverage_floor": 82.5,
+      "worst_crap": 210.0
     }
   },
   "exceptions": [
+    {
+      "function": "internal/t3/process_windows.go:verifyRuntimeProcess",
+      "reason": "Baseline hotspot from #88: the Windows T3 process check has no Windows test; process_linux_test.go covers only the Linux version.",
+      "max_crap": {"windows": 210.0}
+    },
+    {
+      "function": "internal/t3/process.go:runtimePort",
+      "reason": "Baseline hotspot from #88 on Windows only: reached there only through the untested Windows verifyRuntimeProcess. Linux tests cover it.",
+      "max_crap": {"windows": 42.0}
+    },
     {
       "function": "internal/usage/usage.go:credsFromMap",
       "reason": "Baseline hotspot from #88: Antigravity credential parsing (token, refresh token, expiry) has no direct test yet; the ceiling stops it getting worse.",

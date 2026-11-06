@@ -738,18 +738,21 @@ the profile, the summary and every function's complexity, coverage and CRAP.
 [scripts/crap-gate.json](scripts/crap-gate.json) declares the thresholds, and
 the step fails when:
 
-- total statement coverage falls below the platform's floor (83.0% on Linux,
-  half a point under the 83.5% measured when the gate was added);
+- total statement coverage falls below the platform's floor, set half a point
+  under the value measured when the gate was added (Linux 83.0% from 83.5%,
+  Windows 82.5% from 83.0%);
 - a function scores above CRAP 30 without a checked-in exception that gives a
   reason and a ceiling for that platform, which covers any new or changed
   function that crosses 30;
 - a function with an exception scores above its ceiling, or the platform's
-  worst score rises above its declared baseline (72.0 on Linux, from
-  `credsFromMap`);
+  worst score rises above its declared baseline (Linux 72.0 from
+  `credsFromMap`, Windows 210.0 from the untested Windows
+  `verifyRuntimeProcess`);
 - an exception names a function that no longer exists.
 
-The exceptions record the 14 functions above 30 at the baseline with their
-measured scores, so they need no rewrite, but any change that lowers their
+The exceptions record the functions above 30 at the baseline with their
+measured scores: 14 on Linux, the same 14 plus two Windows-only ones on Windows.
+They need no rewrite, but any change that lowers their
 coverage or raises their complexity fails. When a function improves, the step
 prints a notice; lower or remove its ceiling in the same change. Run the gate
 locally on Linux with pinned gocyclo installed:
