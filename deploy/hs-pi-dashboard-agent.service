@@ -1,0 +1,15 @@
+# hs-pi-dashboard agent, systemd user unit (Mini).
+# Install to ~/.config/systemd/user/ as README "mini - always-on server" shows.
+# Host-specific flags and settings live in hs-pi-dashboard-agent.service.d/*.conf
+# drop-ins. Never put secret values in this file or its drop-ins.
+[Unit]
+Description=hs-pi-dashboard local Pi session agent
+After=network-online.target
+
+[Service]
+ExecStart=%h/bin/hs-pi-dashboard agent -addr 100.97.164.73:8787 -machine mini -t3-bin %h/.local/bin/t3
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
