@@ -59,6 +59,7 @@
   .pulse-readout {
     position: absolute; z-index: 2; top: 12px; left: 14px;
     display: flex; align-items: baseline; gap: 9px; pointer-events: none;
+    background: #000603; /* Keep the animated trace behind the readout. */
     text-shadow: 0 0 8px rgba(50, 255, 126, .7);
   }
   .pulse-count { color: #32ff7e; font-size: 34px; font-weight: 700; line-height: 1; }
@@ -324,7 +325,9 @@
   .idle-dot { width: 8px; height: 8px; border-radius: 50%; background: #333; flex: none; }
   .empty-line { color: var(--muted); font-size: 12px; font-style: italic; padding: 4px 0 8px; }
   footer { margin-top: 12px; color: var(--muted); font-size: 11px; }
-  footer a { color: var(--gold-dim); text-decoration: none; }
+  footer a { color: var(--gold-dim); text-decoration: underline 1px; text-underline-offset: 3px; }
+  footer a:hover { color: var(--gold); }
+  .usage-toggle:focus-visible, footer a:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
 </style>
 </head>
 <body>
@@ -363,12 +366,12 @@
   </details>
   <div id="usage-body" class="usage-body"><p class="uempty">loading usage…</p></div>
 </section>
-<section class="pulse-section">
-  <button id="pulse-toggle" class="usage-toggle" aria-expanded="true" aria-controls="pulse-body">
-    <span class="chev">▾</span> Pulse
+<section class="pulse-section" aria-labelledby="pulse-title">
+  <h2><button id="pulse-toggle" class="usage-toggle" type="button" aria-expanded="true" aria-controls="pulse-body">
+    <span class="chev" aria-hidden="true">▾</span> <span id="pulse-title">Pulse</span>
     <span class="hint">rest = active total · beat = +1 activity</span>
-  </button>
-  <div id="pulse-body" class="usage-body" aria-labelledby="pulse-toggle">
+  </button></h2>
+  <div id="pulse-body" class="usage-body">
     <div class="pulse-panel">
       <div class="pulse-readout" aria-live="polite" aria-atomic="true">
         <span id="pulse-count" class="pulse-count">0</span>
