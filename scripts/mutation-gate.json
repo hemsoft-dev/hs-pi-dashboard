@@ -1,0 +1,45 @@
+{
+  "basis": "gremlins v0.6.0 default mutator set, pinned below; one gremlins run per package with that package's own tests. Test efficacy = killed / (killed + lived); timed-out, not-viable and not-covered mutants are reported outside that denominator.",
+  "tool": {
+    "module": "github.com/go-gremlins/gremlins",
+    "version": "v0.6.0",
+    "sum": "h1:3G2ROO0I3q4bb5bxElQIUITTuEbl1iOfVYFqunGwrJI=",
+    "install": "go install github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0"
+  },
+  "workers": 2,
+  "timeout_coefficient": 10,
+  "mutators": ["arithmetic-base", "conditionals-boundary", "conditionals-negation", "increment-decrement", "invert-negatives"],
+  "break_efficacy": 83.0,
+  "target_efficacy": 90.0,
+  "max_timed_out_share": 0.1,
+  "packages": [
+    "./internal/agent",
+    "./internal/fleet",
+    "./internal/githubcli",
+    "./internal/herdr",
+    "./internal/hermes",
+    "./internal/pmd",
+    "./internal/projects",
+    "./internal/resourcecheck",
+    "./internal/sessions",
+    "./internal/usage"
+  ],
+  "exclusions": [
+    {"package": ".", "reason": "Command dispatch in package main has no tests, so every mutant would be not covered; the CRAP gate tracks main.go."},
+    {"package": "./internal/backgroundcmd", "reason": "Its only test file is Windows-only (command_windows_test.go), so on the Linux mutation runner every mutant would be not covered. The Windows CI leg runs that test."},
+    {"package": "./internal/t3", "reason": "Runtime cost: one run of its tests took 27 seconds at 3a4dff7 and 61 seconds in the sandbox at 82e3b72, and a dry run found 369 runnable mutants, so with 2 workers it would add an estimated 40 minutes to 3 hours, several times the 12 minutes of the rest of the scope. Its T3 expiry boundary is guarded through internal/agent's session cache."},
+    {"package": "./internal/web", "reason": "Embedded static assets with no Go logic to mutate; the Node renderer tests cover its scripts."}
+  ],
+  "required_kills": [
+    {"file": "internal/usage/claude_peer.go", "contains": "if err != nil || len(body) > claudePeerMaxBody {", "reason": "#92: the peer response size limit"},
+    {"file": "internal/usage/claude_peer.go", "contains": "len(g.Label) > 128", "reason": "#92: the peer gauge label length limit"},
+    {"file": "internal/usage/claude_peer.go", "contains": "*g.UsedPercent < 0 || *g.UsedPercent > 100", "reason": "#92: the peer gauge percent range"},
+    {"file": "internal/usage/claude_peer.go", "contains": "*g.ProjectedEnd < 0", "reason": "#92: the peer gauge projection sign"},
+    {"file": "internal/usage/claude_peer.go", "contains": "g.WindowSeconds >= 0 && g.WindowSeconds <= claudePeerMaxWindow", "reason": "#92: the peer gauge window range"},
+    {"file": "internal/agent/session_cache.go", "contains": "now.Sub(c.completed) >= sessionInterval", "reason": "#92: the session refresh interval"},
+    {"file": "internal/agent/session_cache.go", "contains": "now.Sub(source.LastSuccessAt) > 5*time.Minute", "reason": "#92: the five-minute T3 source expiry"},
+    {"file": "internal/sessions/claude.go", "contains": "if entry.Type == \"user\" || entry.Type == \"assistant\" {", "reason": "#92: Claude transcript entry filter scope"},
+    {"file": "internal/sessions/claude.go", "contains": "if entry.IsMeta || entry.Message.Role != entry.Type ||", "reason": "#92: Claude transcript meta and role filter"},
+    {"file": "internal/sessions/claude.go", "contains": "(entry.UUID == \"\" && (entry.Type != \"assistant\" || entry.Message.ID == \"\"))", "reason": "#92: Claude transcript UUID or message id filter"}
+  ]
+}

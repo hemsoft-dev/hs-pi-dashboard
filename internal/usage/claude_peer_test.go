@@ -367,6 +367,94 @@ func TestParseClaudePeer(t *testing.T) {
 	}
 }
 
+// paddedPeerSnapshot is a valid one-card snapshot padded with trailing JSON
+// whitespace to exactly size bytes, so only the body bound decides the result.
+func paddedPeerSnapshot(t *testing.T, size int) []byte {
+	t.Helper()
+	body := fmt.Sprintf(`{"machine":"home","cards":[%s]}`, legacyPeerCard(time.Now().Add(-time.Minute), 5))
+	if len(body) > size {
+		t.Fatalf("snapshot of %d bytes does not fit in %d", len(body), size)
+	}
+	return []byte(body + strings.Repeat(" ", size-len(body)))
+}
+
+// The body bound is inclusive: a snapshot of exactly claudePeerMaxBody bytes is
+// a reading, and one byte more is refused rather than decoded.
+func TestClaudePeerBodyBoundIsExact(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		size   int
+		status string
+	}{
+		{"at the bound", claudePeerMaxBody, claudePeerOK},
+		{"one byte over", claudePeerMaxBody + 1, claudePeerInvalid},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := paddedPeerSnapshot(t, tc.size)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write(body) }))
+			defer server.Close()
+			f, provider := peerFetcher(t, server.URL+"/usage")
+			c := f.claude(context.Background())
+			if c.Claude == nil || c.Claude.PeerStatus != tc.status || provider.Load() != 0 {
+				t.Fatalf("%d bytes: card=%+v provenance=%+v provider=%d", tc.size, c, c.Claude, provider.Load())
+			}
+			if tc.status == claudePeerOK && (c.Error != "" || len(c.Gauges) != 2 || *c.Gauges[0].UsedPercent != 5) {
+				t.Fatalf("reading at the bound refused: %+v", c)
+			}
+			if tc.status != claudePeerOK && (len(c.Gauges) != 0 || c.Error != "Claude usage from home: response unreadable") {
+				t.Fatalf("oversized reading decoded: %+v", c)
+			}
+		})
+	}
+}
+
+// Every gauge limit is inclusive at its edge and refuses the next value out.
+func TestClaudePeerGaugeLimitsAreInclusive(t *testing.T) {
+	pct := func(v float64) *float64 { return &v }
+	gauge := func(edit func(*Gauge)) Gauge {
+		g := Gauge{Label: "5h", UsedPercent: pct(5), ResetAt: time.Now().Add(time.Hour), WindowSeconds: 18000}
+		edit(&g)
+		return g
+	}
+	for _, tc := range []struct {
+		name string
+		g    Gauge
+		want bool
+	}{
+		{"label of 128 bytes", gauge(func(g *Gauge) { g.Label = strings.Repeat("w", 128) }), true},
+		{"label of 129 bytes", gauge(func(g *Gauge) { g.Label = strings.Repeat("w", 129) }), false},
+		// The limit counts bytes: 43 three-byte runes are 129 bytes.
+		{"label of 129 bytes in 43 runes", gauge(func(g *Gauge) { g.Label = strings.Repeat("界", 43) }), false},
+		{"used 0%", gauge(func(g *Gauge) { g.UsedPercent = pct(0) }), true},
+		{"used 100%", gauge(func(g *Gauge) { g.UsedPercent = pct(100) }), true},
+		{"used just below 0%", gauge(func(g *Gauge) { g.UsedPercent = pct(-0.001) }), false},
+		{"used just above 100%", gauge(func(g *Gauge) { g.UsedPercent = pct(100.001) }), false},
+		{"projected end 0", gauge(func(g *Gauge) { g.ProjectedEnd = pct(0) }), true},
+		{"projected end just below 0", gauge(func(g *Gauge) { g.ProjectedEnd = pct(-0.001) }), false},
+		{"window 0", gauge(func(g *Gauge) { g.WindowSeconds = 0 }), true},
+		{"window at the maximum", gauge(func(g *Gauge) { g.WindowSeconds = claudePeerMaxWindow }), true},
+		{"window just over the maximum", gauge(func(g *Gauge) { g.WindowSeconds = claudePeerMaxWindow + 0.5 }), false},
+		{"window just below 0", gauge(func(g *Gauge) { g.WindowSeconds = -0.5 }), false},
+		{"reset time without percent", gauge(func(g *Gauge) { g.UsedPercent = nil }), true},
+	} {
+		if got := validClaudePeerGauge(tc.g); got != tc.want {
+			t.Errorf("%s: valid=%v, want %v", tc.name, got, tc.want)
+		}
+	}
+
+	// The same edge values pass end to end and keep their values.
+	label := strings.Repeat("w", 128)
+	fixture := &peerFixture{machine: "home", card: fmt.Sprintf(`{"key":"claude","kind":"quota","gauges":[{"label":%q,"usedPercent":100,"resetAt":%q,"windowSeconds":0,"projectedEnd":0},{"label":"Weekly","usedPercent":0,"resetAt":%q,"windowSeconds":%v}],"fetchedAt":%q}`,
+		label, peerStamp(time.Now().Add(time.Hour)), peerStamp(time.Now().Add(72*time.Hour)), claudePeerMaxWindow, peerStamp(time.Now().Add(-time.Minute)))}
+	f, _ := peerFetcher(t, peerServer(t, fixture).URL+"/usage")
+	c := f.claude(context.Background())
+	if c.Error != "" || c.Claude == nil || c.Claude.PeerStatus != claudePeerOK || len(c.Gauges) != 2 ||
+		c.Gauges[0].Label != label || *c.Gauges[0].UsedPercent != 100 || c.Gauges[0].ProjectedEnd == nil || *c.Gauges[0].ProjectedEnd != 0 ||
+		*c.Gauges[1].UsedPercent != 0 || c.Gauges[1].WindowSeconds != claudePeerMaxWindow {
+		t.Fatalf("edge reading refused or altered: %+v provenance=%+v", c, c.Claude)
+	}
+}
+
 func peerServer(t *testing.T, fixture *peerFixture) *httptest.Server {
 	t.Helper()
 	server := httptest.NewServer(fixture)
