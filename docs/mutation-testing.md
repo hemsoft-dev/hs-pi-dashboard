@@ -26,9 +26,10 @@ repository is built or tested on the host.
 ```bash
 go install github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0
 go mod download
+mutation_work="$(mktemp -d)"
 python3 scripts/mutation_sandbox.py --go-root "$(go env GOROOT)" \
   --gremlins "$(go env GOPATH)/bin/gremlins" --module-cache "$(go env GOMODCACHE)" \
-  --work "$(mktemp -u -d)" --report-dir mutation-report
+  --work "$mutation_work/run" --report-dir mutation-report
 # Only some in-scope packages:
 python3 scripts/mutation_sandbox.py ... --packages ./internal/usage ./internal/agent
 # Prove the sandbox and stop before any mutant:
@@ -40,7 +41,10 @@ python3 -m unittest discover -s scripts -p "test_mutation*.py"
 ```
 
 `--go-root` must be the Go version in `go.mod` (its `VERSION` file is checked),
-and `--module-cache` must already hold the go.sum modules. On a shared host,
+and `--module-cache` must already hold the selected module graph from
+`go mod download`. Historical unused go.sum entries need not be cached;
+the sandbox verifies and downloads the selected graph from the staged local
+proxy, with no route to the host or internet. On a shared host,
 keep the run's memory bounded, for example under
 `systemd-run --user --scope -p MemoryMax=4G -p MemorySwapMax=0 -p OOMPolicy=continue`.
 

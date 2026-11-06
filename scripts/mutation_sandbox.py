@@ -221,7 +221,11 @@ def escape_module(path: str) -> str:
 
 
 def stage_proxy(go_sum: Path, module_cache: Path, proxy: Path) -> int:
-    """Copy the go.sum modules' .mod, .zip and .info files into a file proxy."""
+    """Copy cached go.sum module files; unused historical sums need not be cached.
+
+    The isolated go mod download resolves the selected graph and refuses any
+    missing selected module. No module fetch or repository Go runs on the host.
+    """
     download = module_cache / "cache" / "download"
     files = 0
     versions: dict[tuple[str, str], bool] = {}
@@ -238,15 +242,15 @@ def stage_proxy(go_sum: Path, module_cache: Path, proxy: Path) -> int:
         dst = proxy / escape_module(module) / "@v"
         dst.mkdir(parents=True, exist_ok=True)
         escaped = escape_module(version)
-        for ext, required in ((".mod", True), (".info", False), (".zip", False)):
+        for ext in (".mod", ".info", ".zip"):
             path = src / (escaped + ext)
             if path.is_file() and not path.is_symlink():
                 shutil.copy2(path, dst / path.name)
                 files += 1
-            elif required:
-                raise SandboxError(f"{path} missing; run `go mod download` before the sandbox")
         if zip_needed and not (dst / (escaped + ".zip")).exists():
             log(f"note: no zip for {module} {version} (only needed if a build uses it)")
+    if versions and not files:
+        raise SandboxError("no matching module files cached; run `go mod download` before the sandbox")
     return files
 
 

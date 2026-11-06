@@ -95,7 +95,7 @@ class Staging(unittest.TestCase):
             for ext in (".mod", ".zip", ".info"):
                 (folder / (version + ext)).write_text(module, encoding="utf-8")
         go_sum = root / "go.sum"
-        go_sum.write_text("example.com/a v1.0.0 h1:a=\nexample.com/a v1.0.0/go.mod h1:b=\nexample.com/Up v2.0.0/go.mod h1:c=\n", encoding="utf-8")
+        go_sum.write_text("example.com/a v1.0.0 h1:a=\nexample.com/a v1.0.0/go.mod h1:b=\nexample.com/Up v2.0.0/go.mod h1:c=\nexample.com/unused-old v0.1.0/go.mod h1:old=\n", encoding="utf-8")
         proxy = root / "proxy"
         self.assertEqual(sb.stage_proxy(go_sum, root / "cache", proxy), 6)
         self.assertTrue((proxy / "example.com/!up/@v/v2.0.0.mod").is_file())
