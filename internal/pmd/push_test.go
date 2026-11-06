@@ -3,6 +3,7 @@ package pmd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -275,13 +276,24 @@ func TestServerAndNetworkFailuresRetryOnTheNextTick(t *testing.T) {
 			t.Fatalf("log %d = %q, want %q", i, h.logs[i], w)
 		}
 	}
-	h.p.opts.URL = "http://127.0.0.1:1"
+	// A network failure comes from the client, not a fixed address: something
+	// may listen on any local port (Home has a service on 127.0.0.1:1 that
+	// answers 404), which turned this step into an auth hold there (#100).
+	h.p.opts.Client = &http.Client{Transport: refusingTransport{}}
 	h.content = "a"
 	h.advance(Interval)
-	if !strings.Contains(h.logs[len(h.logs)-1], "pmd unreachable") {
-		t.Fatalf("logs = %q", h.logs)
+	h.expectPosts(4, "network failure")
+	if got := h.logs[len(h.logs)-1]; got != "pmd push: pmd unreachable, retrying: connection refused" {
+		t.Fatalf("logs = %q, want the unwrapped network error last", h.logs)
 	}
 	h.expectNoSecretLogged()
+}
+
+// refusingTransport fails every request as a refused connection would.
+type refusingTransport struct{}
+
+func (refusingTransport) RoundTrip(*http.Request) (*http.Response, error) {
+	return nil, errors.New("connection refused")
 }
 
 func TestEnvironmentLabelsLogLines(t *testing.T) {
