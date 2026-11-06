@@ -75,9 +75,9 @@ jobs:
         if: runner.os == 'Linux'
         run: node --test scripts/pulse.test.cjs scripts/sessions.test.cjs scripts/usage.test.cjs internal/web/herdr.test.cjs internal/web/projects.test.cjs internal/web/billing.test.cjs
 
-      - name: Test deployment binary checks
+      - name: Test deployment binary checks and systemd units
         if: runner.os == 'Linux'
-        run: python3 -m unittest discover -s deploy -p test_build_fleet.py
+        run: python3 -m unittest discover -s deploy -p "test_*.py"
 
       - name: Install deadcode
         if: runner.os == 'Linux'

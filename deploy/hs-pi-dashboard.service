@@ -1,0 +1,15 @@
+# hs-pi-dashboard fleet server, systemd user unit (Mini).
+# Install to ~/.config/systemd/user/ as README "mini - always-on server" shows.
+# Host-specific flags live in hs-pi-dashboard.service.d/*.conf drop-ins.
+# Never put secret values in this file or its drop-ins.
+[Unit]
+Description=hs-pi-dashboard fleet server
+After=network-online.target
+
+[Service]
+ExecStart=%h/bin/hs-pi-dashboard serve -addr 100.97.164.73:8788
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

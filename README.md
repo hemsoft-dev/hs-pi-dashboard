@@ -795,18 +795,111 @@ launchctl load ~/Library/LaunchAgents/com.hemsoft.hs-pi-dashboard.agent.plist
 RunAtLoad + KeepAlive start the agent at login and restart it after crashes or
 a failed Tailscale bind, so reboots no longer leave the machine dark.
 
-### mini — always-on server
+### mini — always-on server and agent (systemd user units)
 
-Ship the Linux binary via Taildrop, then run it at boot:
+Mini runs both processes from one binary, `~/bin/hs-pi-dashboard`, as systemd
+user units. The versioned units in [deploy/](deploy/) are the ones Mini runs:
+
+| Unit | Command | Restart policy |
+| --- | --- | --- |
+| [`hs-pi-dashboard.service`](deploy/hs-pi-dashboard.service) | `serve` on `100.97.164.73:8788` | `Restart=on-failure`, `RestartSec=5` |
+| [`hs-pi-dashboard-agent.service`](deploy/hs-pi-dashboard-agent.service) | `agent` on `100.97.164.73:8787` | `Restart=always`, `RestartSec=5` |
+
+Mini's flags and settings live in drop-ins beside each unit:
+`hs-pi-dashboard.service.d/herdr-fleet.conf` (the `-fleet` list with terminal
+links), and `hs-pi-dashboard-agent.service.d/` with `projects.conf` (Projects
+checkouts, `-projects-poll`, `-claude-usage-peer`), `github-billing.conf`
+(`GITHUB_BILLING_ORG`) and `github-copilot-policy.conf`
+(`GITHUB_COPILOT_PAID_USAGE`). A drop-in that changes the command clears it
+with an empty `ExecStart=` line first, then gives the full command. The units
+use `%h` for the account's home folder; `systemctl --user cat` on Mini shows
+the same lines with `/home/franz` written out.
+
+No unit or drop-in holds a secret. The agent gets GitHub access from gh's
+stored login under the service account, and its pmd token from
+`~/.config/hs-pi-dashboard/pmd-token` (mode 600, see
+[pmd T3 snapshot push](#pmd-t3-snapshot-push)). If a host needs a secret in
+the service environment, such as `GH_TOKEN`, put it in a local drop-in or
+`EnvironmentFile=` outside the repository, readable only by the account
+(`chmod 600`), and never commit it.
+
+Install on a Linux account, starting from a repository checkout. Ship the
+Linux binary via Taildrop, or build it with `python deploy/build_fleet.py
+--target linux-amd64`:
 
 ```bash
-mkdir -p ~/bin
+mkdir -p ~/bin ~/.config/systemd/user
 mv ~/Downloads/from-home--hs-pi-dashboard-linux-amd64 ~/bin/hs-pi-dashboard
 chmod +x ~/bin/hs-pi-dashboard
-(crontab -l 2>/dev/null; echo '@reboot /home/franz/bin/hs-pi-dashboard serve -addr 100.97.164.73:8788 >> /home/franz/logs/hs-pi-dashboard.log 2>&1') | crontab -
-# start it now, no reboot needed:
-mkdir -p ~/logs && nohup ~/bin/hs-pi-dashboard serve -addr 100.97.164.73:8788 >> ~/logs/hs-pi-dashboard.log 2>&1 &
+cp deploy/hs-pi-dashboard.service deploy/hs-pi-dashboard-agent.service ~/.config/systemd/user/
+cp -r deploy/hs-pi-dashboard.service.d deploy/hs-pi-dashboard-agent.service.d ~/.config/systemd/user/
+# keep both services running without an open login session, and after reboots:
+loginctl enable-linger "$USER"
+systemctl --user daemon-reload
+systemctl --user enable --now hs-pi-dashboard.service hs-pi-dashboard-agent.service
+systemctl --user show -p Restart hs-pi-dashboard.service hs-pi-dashboard-agent.service
 ```
+
+The units bind Mini's Tailscale address. On another host, change `-addr` (and
+`-machine` for the agent) in a drop-in such as `local.conf`, which clears and
+replaces `ExecStart=` like `projects.conf` does, and drop the drop-ins that
+don't apply. A bind fails until Tailscale is up; both restart policies retry
+every 5 seconds until it succeeds. Mini's crontab has no dashboard entry;
+remove any old `@reboot` line from an earlier install.
+
+After editing a unit or drop-in, reload and restart:
+
+```bash
+systemctl --user daemon-reload
+systemctl --user restart hs-pi-dashboard.service hs-pi-dashboard-agent.service
+systemctl --user status hs-pi-dashboard.service hs-pi-dashboard-agent.service
+```
+
+Logs go to the user journal:
+
+```bash
+journalctl --user -u hs-pi-dashboard.service -u hs-pi-dashboard-agent.service -f
+journalctl --user -u hs-pi-dashboard-agent.service --since "1 hour ago"
+```
+
+Check that the units in `deploy/` still match what runs:
+`systemd-analyze --user verify deploy/hs-pi-dashboard.service
+deploy/hs-pi-dashboard-agent.service` should print nothing about these units
+(it also checks that `~/bin/hs-pi-dashboard` exists and loads the `.d` folders
+beside them; over SSH, set `XDG_RUNTIME_DIR=/run/user/$(id -u)` first),
+and `systemctl --user cat hs-pi-dashboard.service hs-pi-dashboard-agent.service`
+should show the files in `deploy/` apart from comments and `%h`. CI runs
+`deploy/test_systemd_units.py`, which checks the restart policies, that each
+flag exists in `main.go`, and that no unit names a secret.
+
+#### Update and roll back on Mini
+
+Both units run the same binary, so an update or rollback restarts both. Keep
+the binary being replaced under a name that records the commit, as Mini does
+(`hs-pi-dashboard.before-<commit>`), then replace and restart:
+
+```bash
+cp -p ~/bin/hs-pi-dashboard ~/bin/hs-pi-dashboard.before-<old-commit>
+# <new-binary> is the shipped or built hs-pi-dashboard-linux-amd64
+install -m 755 <new-binary> ~/bin/hs-pi-dashboard.new
+mv ~/bin/hs-pi-dashboard.new ~/bin/hs-pi-dashboard
+systemctl --user restart hs-pi-dashboard.service hs-pi-dashboard-agent.service
+```
+
+To roll back, put the previous binary back the same way and restart:
+
+```bash
+ls -lt ~/bin/hs-pi-dashboard.before-*
+install -m 755 ~/bin/hs-pi-dashboard.before-<old-commit> ~/bin/hs-pi-dashboard.new
+mv ~/bin/hs-pi-dashboard.new ~/bin/hs-pi-dashboard
+systemctl --user restart hs-pi-dashboard.service hs-pi-dashboard-agent.service
+journalctl --user -u hs-pi-dashboard.service -u hs-pi-dashboard-agent.service -n 50
+```
+
+Then check `http://100.97.164.73:8788/healthz` and the agent's
+`http://100.97.164.73:8787/health`. If a unit or drop-in change caused the
+problem, restore the previous file from git (`git show <old-commit>:deploy/<file>`),
+copy it into `~/.config/systemd/user/`, and run `daemon-reload` and `restart`.
 
 ## Security model (v1)
 
@@ -843,5 +936,5 @@ limited to other systems by name (`*_windows.go`, `*_darwin.go`).
 - [ ] v2: xAI usage once a source exists (card removed for now — Grok
       exposes no usage API)
 - [ ] v2: optional bearer token between server and agents
-- [ ] v2: systemd user unit for mini (with lingering) instead of cron
+- [x] v2: systemd user units for mini (with lingering) instead of cron
 - [ ] v3: click-through session transcript, cost rollups per project
