@@ -54,8 +54,10 @@ jobs:
         if: runner.os == 'macOS'
         run: go test ./...
 
+      # bash: pwsh splits -coverprofile=cover.out at the dot into a ".out" package.
       - name: Test with coverage
         if: runner.os == 'Windows'
+        shell: bash
         run: go test -covermode=atomic -coverprofile=cover.out ./...
 
       - name: Test with race detector and coverage
