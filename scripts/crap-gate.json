@@ -1,0 +1,86 @@
+{
+  "basis": "Go statement coverage (go test -covermode=atomic) and gocyclo v0.6.0 cyclomatic complexity for non-test functions. CRAP = complexity^2 * (1 - coverage)^3 + complexity, rounded to 0.1.",
+  "crap_threshold": 30,
+  "platforms": {
+    "linux": {
+      "coverage_floor": 83.0,
+      "worst_crap": 72.0
+    },
+    "windows": {
+      "coverage_floor": 70.0,
+      "worst_crap": 72.0
+    }
+  },
+  "exceptions": [
+    {
+      "function": "internal/usage/usage.go:credsFromMap",
+      "reason": "Baseline hotspot from #88: Antigravity credential parsing (token, refresh token, expiry) has no direct test yet; the ceiling stops it getting worse.",
+      "max_crap": {"linux": 72.0, "windows": 72.0}
+    },
+    {
+      "function": "internal/fleet/server.go:(*Server).Run",
+      "reason": "Baseline hotspot from #88: starts the poll tickers and blocks in ListenAndServe; only the running service exercises it.",
+      "max_crap": {"linux": 56.0, "windows": 56.0}
+    },
+    {
+      "function": "internal/usage/usage.go:(*Fetcher).refreshAntigravity",
+      "reason": "Baseline hotspot from #88: Antigravity token refresh posts to a fixed token URL that tests do not redirect yet.",
+      "max_crap": {"linux": 56.0, "windows": 56.0}
+    },
+    {
+      "function": "main.go:main",
+      "reason": "Baseline hotspot from #88: command dispatch in package main, which has no tests.",
+      "max_crap": {"linux": 56.0, "windows": 56.0}
+    },
+    {
+      "function": "internal/t3/collector.go:(*Collector).Poll",
+      "reason": "Baseline hotspot from #88: complexity 49 at 97.9% coverage. Splitting it is a separate refactor.",
+      "max_crap": {"linux": 49.0, "windows": 49.0}
+    },
+    {
+      "function": "internal/usage/claude.go:parseClaudeWindows",
+      "reason": "Baseline hotspot from #88: complexity 46 at 98.8% coverage; the score is complexity, not missing tests.",
+      "max_crap": {"linux": 46.0, "windows": 46.0}
+    },
+    {
+      "function": "internal/t3/runtime.go:(*runtimeSource).snapshot",
+      "reason": "Baseline hotspot from #88: complexity 40 at 86.9% coverage in the T3 runtime probe.",
+      "max_crap": {"linux": 43.6, "windows": 43.6}
+    },
+    {
+      "function": "main.go:runAgent",
+      "reason": "Baseline hotspot from #88: agent startup in package main, which has no tests.",
+      "max_crap": {"linux": 42.0, "windows": 42.0}
+    },
+    {
+      "function": "internal/sessions/claude.go:applyClaudeEntry",
+      "reason": "Baseline hotspot from #88: complexity 40 at 97.4% coverage; the score is complexity, not missing tests.",
+      "max_crap": {"linux": 40.0, "windows": 40.0}
+    },
+    {
+      "function": "internal/usage/activity.go:(*Fetcher).grokActivity",
+      "reason": "Baseline hotspot from #88: complexity 28 at 77.9% coverage in Grok activity parsing.",
+      "max_crap": {"linux": 36.5, "windows": 36.5}
+    },
+    {
+      "function": "internal/githubcli/binary.go:Binary",
+      "reason": "Baseline hotspot from #88: GitHub CLI discovery depends on the host's install paths and is mostly untested.",
+      "max_crap": {"linux": 35.3, "windows": 35.3}
+    },
+    {
+      "function": "internal/t3/collector.go:(*Collector).readThreads",
+      "reason": "Baseline hotspot from #88: complexity 33 at 90.2% coverage in T3 thread reading.",
+      "max_crap": {"linux": 34.0, "windows": 34.0}
+    },
+    {
+      "function": "internal/usage/github.go:parseBilling",
+      "reason": "Baseline hotspot from #88: complexity 32 at 92.5% coverage in billing parsing.",
+      "max_crap": {"linux": 32.4, "windows": 32.4}
+    },
+    {
+      "function": "internal/usage/antigravity_cli.go:(*Fetcher).runAntigravityUsage",
+      "reason": "Baseline hotspot from #88: needs an Antigravity CLI session file and the agy binary, which tests do not fake yet.",
+      "max_crap": {"linux": 31.8, "windows": 31.8}
+    }
+  ]
+}

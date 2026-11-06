@@ -3,6 +3,8 @@ hs-pi-dashboard
 dist/
 *.test
 coverage.out
+cover.out
+crap-report/
 agent.log
 serve.log
 __pycache__/

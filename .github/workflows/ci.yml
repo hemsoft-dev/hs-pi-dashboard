@@ -40,6 +40,10 @@ jobs:
       - name: Install govulncheck
         run: go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
 
+      - name: Install gocyclo
+        if: runner.os != 'macOS'
+        run: go install github.com/fzipp/gocyclo/cmd/gocyclo@v0.6.0
+
       - name: Build
         run: go build ./...
 
@@ -47,12 +51,16 @@ jobs:
         run: go vet ./...
 
       - name: Test
-        if: runner.os != 'Linux'
+        if: runner.os == 'macOS'
         run: go test ./...
 
-      - name: Test with race detector
+      - name: Test with coverage
+        if: runner.os == 'Windows'
+        run: go test -covermode=atomic -coverprofile=cover.out ./...
+
+      - name: Test with race detector and coverage
         if: runner.os == 'Linux'
-        run: go test -race -p 1 ./...
+        run: go test -race -p 1 -covermode=atomic -coverprofile=cover.out ./...
 
       - name: Staticcheck
         run: staticcheck ./...
@@ -79,6 +87,10 @@ jobs:
         if: runner.os == 'Linux'
         run: python3 -m unittest discover -s deploy -p "test_*.py"
 
+      - name: Test coverage and CRAP gate
+        if: runner.os == 'Linux'
+        run: python3 -m unittest discover -s scripts -p "test_*.py"
+
       - name: Install deadcode
         if: runner.os == 'Linux'
         run: go install golang.org/x/tools/cmd/deadcode@v0.52.0
@@ -86,6 +98,25 @@ jobs:
       - name: Deadcode
         if: runner.os == 'Linux'
         run: deadcode ./...
+
+      # Last, so other findings still report. Fails on a coverage drop below the
+      # declared floor or a CRAP regression; see scripts/crap-gate.json and the
+      # README Build section.
+      - name: Check coverage and CRAP
+        if: runner.os != 'macOS'
+        shell: bash
+        run: >-
+          ${{ runner.os == 'Windows' && 'python' || 'python3' }} scripts/crap_gate.py
+          --platform ${{ runner.os == 'Windows' && 'windows' || 'linux' }}
+          --profile cover.out --report-dir crap-report --summary "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload coverage and CRAP report
+        if: ${{ !cancelled() && runner.os != 'macOS' && hashFiles('crap-report/summary.md') != '' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage-crap-${{ runner.os }}
+          path: crap-report/
+          retention-days: 14
 
   # Keep the existing required status stable; it succeeds only when all legs do.
   verify:
