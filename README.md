@@ -699,8 +699,9 @@ process-verification tests. Every platform also runs pinned govulncheck v1.9.0
 on its native source configuration; reachable vulnerabilities fail CI. Package
 execution is serialized with `-p 1` to keep bounded collector tests from competing
 with other test binaries. Go formatting, Node renderer tests, Python deployment
-tests and deadcode run once on Linux. The stable `verify` check aggregates all
-three platform results. The [main ruleset](https://github.com/hemsoft-dev/hs-pi-dashboard/rules/25751504)
+tests and `deadcode -test ./...` run once on Linux. Including test roots
+keeps shared test-support packages in the reachability analysis. The stable
+`verify` check aggregates all three platform results. The [main ruleset](https://github.com/hemsoft-dev/hs-pi-dashboard/rules/25751504)
 requires `verify` from GitHub Actions on an up-to-date branch before merging.
 Main changes must go through a pull request; no formal approval count is
 required. Force pushes and deletion are blocked, and there are no bypass actors,

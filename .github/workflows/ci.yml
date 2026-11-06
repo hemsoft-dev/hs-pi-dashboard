@@ -99,7 +99,7 @@ jobs:
 
       - name: Deadcode
         if: runner.os == 'Linux'
-        run: deadcode ./...
+        run: deadcode -test ./...
 
       # Last, so other findings still report. Fails on a coverage drop below the
       # declared floor or a CRAP regression; see scripts/crap-gate.json and the
