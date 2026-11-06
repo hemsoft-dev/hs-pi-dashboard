@@ -250,7 +250,7 @@ async function screenshotFooter(page, file) {
     const bottom = Math.min(document.documentElement.scrollHeight, r.bottom + scrollY + 8);
     return {x, y, width: right - x, height: bottom - y};
   });
-  await page.screenshot({path: file, clip});
+  await page.screenshot({path: file, fullPage: true, clip});
 }
 
 async function scanCase(browser, axeSource, baseUrl, state, viewport, screenshotDir) {
