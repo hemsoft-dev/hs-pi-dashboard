@@ -247,6 +247,16 @@ func TestRefreshRetainsOriginalReadingOnFailuresAndRecovers(t *testing.T) {
 	if initial.Error != "" || initial.Gauges[0].UsedPercent == nil || *initial.Gauges[0].UsedPercent != 0 {
 		t.Fatalf("initial=%+v", initial)
 	}
+	// Later refreshes can share the initial stamps within one Windows clock
+	// tick. Once the clock is past every initial stamp, a freshly stamped card
+	// is strictly later: Equal below proves retention and After proves recovery.
+	latest := initial.FetchedAt
+	for _, c := range original.Cards {
+		if c.FetchedAt.After(latest) {
+			latest = c.FetchedAt
+		}
+	}
+	waitForClockAfter(t, latest)
 	phase.Store(1)
 	for i := 0; i < 2; i++ {
 		store.refresh(context.Background())
