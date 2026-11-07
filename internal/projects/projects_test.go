@@ -43,6 +43,7 @@ func TestInvalidContract(t *testing.T) {
 		}
 	}
 }
+
 // A restarted agent has no previous document, so a failed first sweep
 // publishes an error with no document and waits a full interval. The fleet
 // keeps its own last document for this case; fleet tests rely on this output.
