@@ -234,6 +234,9 @@ func (s *Server) fetch(ctx context.Context, t Target) MachineState {
 		state.Error = err.Error()
 		return s.mergeStale(state)
 	}
+	if collectionPending(snap) {
+		return s.mergePending(state, snap)
+	}
 
 	state.Online = true
 	state.GeneratedAt = snap.GeneratedAt
@@ -280,6 +283,56 @@ func (s *Server) mergeStale(state MachineState) MachineState {
 		state.GeneratedAt = prev.GeneratedAt
 	}
 	return state
+}
+
+// collectionPending reports whether snap is the placeholder an agent serves
+// before its first session collection completes. A completed collection
+// always names the Pi collector root in sessionsDir, even when it found no
+// sessions, so a reply with neither sessionsDir nor a sessions array has not
+// collected anything yet.
+func collectionPending(snap sessions.Snapshot) bool {
+	return snap.SessionsDir == "" && snap.Sessions == nil
+}
+
+// sessionCollectionPending is the machine error while an agent's first
+// session collection runs.
+const sessionCollectionPending = "session collection pending after agent start"
+
+// mergePending keeps a reachable agent online while its first collection runs,
+// but never as a healthy machine with no sessions. The reply's own source
+// health stays visible, the error names the pending collection, and the last
+// good rows remain as inactive history so nothing counts them as live until a
+// real collection reports them again.
+func (s *Server) mergePending(state MachineState, snap sessions.Snapshot) MachineState {
+	state.Online = true
+	state.Error = sessionCollectionPending
+	state.GeneratedAt = snap.GeneratedAt
+	state.Sources = snap.Sources
+	s.mu.Lock()
+	prev := s.cache[state.Name]
+	s.mu.Unlock()
+	if len(prev.Sessions) > 0 {
+		state.Error += "; showing last known sessions"
+		state.GeneratedAt = prev.GeneratedAt
+		state.Sessions = retainedSessions(prev.Sessions)
+	}
+	return state
+}
+
+// retainedSessions copies cached rows as inactive history. The copy keeps the
+// cached MachineState unchanged for concurrent readers. T3 rows lose their
+// sidebar badge, as the agent does for an expired T3 source.
+func retainedSessions(rows []sessions.Summary) []sessions.Summary {
+	out := append([]sessions.Summary(nil), rows...)
+	for i := range out {
+		row := &out[i]
+		row.Active = false
+		if row.Source == "t3" {
+			row.Status = "unavailable"
+			row.T3Status = nil
+		}
+	}
+	return out
 }
 
 func (s *Server) routes() http.Handler {
@@ -459,7 +512,14 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 	_ = enc.Encode(payload)
 }
 
+// fetchProjects keeps the last good document for each checkout. An endpoint
+// failure keeps the whole cached snapshot with an explicit error. A reply keeps
+// each path's cached document when it has none, as a restarted agent's pending
+// or failed first sweep does, or only an older one; see keepNewerDocuments.
 func (s *Server) fetchProjects(ctx context.Context, t Target) *projects.Snapshot {
+	s.mu.Lock()
+	previous := s.cache[t.Name].Projects
+	s.mu.Unlock()
 	c, cancel := context.WithTimeout(ctx, s.timeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(c, http.MethodGet, strings.TrimRight(t.URL, "/")+"/projects", nil)
@@ -471,18 +531,39 @@ func (s *Server) fetchProjects(ctx context.Context, t Target) *projects.Snapshot
 			if resp.StatusCode == http.StatusOK {
 				var snap projects.Snapshot
 				if json.NewDecoder(io.LimitReader(resp.Body, 16<<20)).Decode(&snap) == nil && snap.Results != nil {
+					keepNewerDocuments(snap.Results, previous)
 					return &snap
 				}
 			}
 		}
 	}
-	s.mu.Lock()
-	previous := s.cache[t.Name].Projects
-	s.mu.Unlock()
 	snap := projects.Snapshot{Error: message, Results: []projects.Result{}}
 	if previous != nil {
 		snap = *previous
 		snap.Error = message
 	}
 	return &snap
+}
+
+// keepNewerDocuments gives each freshly decoded result the cached document for
+// its path when the reply has no document or an older one. The result keeps
+// its own error, so a pending or failed sweep shows beside the retained data.
+// Paths without a cached document keep the reply unchanged. Documents are
+// shared read-only between cache entries; results is the caller's own slice.
+func keepNewerDocuments(results []projects.Result, previous *projects.Snapshot) {
+	if previous == nil {
+		return
+	}
+	cached := make(map[string]*projects.Document, len(previous.Results))
+	for _, r := range previous.Results {
+		if r.Document != nil {
+			cached[r.Path] = r.Document
+		}
+	}
+	for i := range results {
+		doc := cached[results[i].Path]
+		if doc != nil && (results[i].Document == nil || results[i].Document.GeneratedAt.Before(doc.GeneratedAt)) {
+			results[i].Document = doc
+		}
+	}
 }
