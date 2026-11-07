@@ -151,6 +151,101 @@
    "prs": []
   },
   {
+   "threadId": "t-settled-empty-completion",
+   "title": "Settled after an empty completion",
+   "project": "chief",
+   "branch": null,
+   "creationSource": null,
+   "root": null,
+   "parent": null,
+   "model": null,
+   "updatedAt": "2026-10-25T09:00:00.000Z",
+   "latestRun": {
+    "status": "failed",
+    "at": "2026-10-25T09:00:00.000Z"
+   },
+   "active": false,
+   "queued": false,
+   "settled": false,
+   "prs": []
+  },
+  {
+   "threadId": "t-settled-fraction",
+   "title": "Settled a tenth of a nanosecond after",
+   "project": "chief",
+   "branch": null,
+   "creationSource": null,
+   "root": null,
+   "parent": null,
+   "model": null,
+   "updatedAt": "2026-10-25T09:00:00.000Z",
+   "latestRun": {
+    "status": "failed",
+    "at": "2026-10-25T09:00:00.000000000Z"
+   },
+   "active": false,
+   "queued": false,
+   "settled": true,
+   "prs": []
+  },
+  {
+   "threadId": "t-settled-fraction-early",
+   "title": "Settled under a nanosecond before",
+   "project": "chief",
+   "branch": null,
+   "creationSource": null,
+   "root": null,
+   "parent": null,
+   "model": null,
+   "updatedAt": "2026-10-25T09:00:00.000Z",
+   "latestRun": {
+    "status": "cancelled",
+    "at": "2026-10-25T09:00:00.00000000019Z"
+   },
+   "active": false,
+   "queued": false,
+   "settled": false,
+   "prs": []
+  },
+  {
+   "threadId": "t-settled-invalid",
+   "title": "Settled at no time",
+   "project": "chief",
+   "branch": null,
+   "creationSource": null,
+   "root": null,
+   "parent": null,
+   "model": null,
+   "updatedAt": "2026-10-25T09:00:00.000Z",
+   "latestRun": {
+    "status": "completed",
+    "at": "2026-10-25T09:00:00.000Z"
+   },
+   "active": false,
+   "queued": false,
+   "settled": false,
+   "prs": []
+  },
+  {
+   "threadId": "t-settled-naive",
+   "title": "Settled at a naive time",
+   "project": "chief",
+   "branch": null,
+   "creationSource": null,
+   "root": null,
+   "parent": null,
+   "model": null,
+   "updatedAt": "2026-10-25T09:00:00.000Z",
+   "latestRun": {
+    "status": "completed",
+    "at": "2026-10-25T09:00:00.000Z"
+   },
+   "active": false,
+   "queued": false,
+   "settled": false,
+   "prs": []
+  },
+  {
    "threadId": "t-settled-norun",
    "title": "Settled without runs",
    "project": "chief",
@@ -162,6 +257,63 @@
    "updatedAt": "2026-10-25T08:00:00.000Z",
    "latestRun": null,
    "active": false,
+   "queued": false,
+   "settled": true,
+   "prs": []
+  },
+  {
+   "threadId": "t-settled-offset",
+   "title": "Settled with an offset",
+   "project": "chief",
+   "branch": null,
+   "creationSource": null,
+   "root": null,
+   "parent": null,
+   "model": null,
+   "updatedAt": "2026-10-25T09:00:00.000Z",
+   "latestRun": {
+    "status": "completed",
+    "at": "2026-10-25T09:00:00.000Z"
+   },
+   "active": false,
+   "queued": false,
+   "settled": true,
+   "prs": []
+  },
+  {
+   "threadId": "t-settled-offset-early",
+   "title": "Settled with an offset before the run",
+   "project": "chief",
+   "branch": null,
+   "creationSource": null,
+   "root": null,
+   "parent": null,
+   "model": null,
+   "updatedAt": "2026-10-25T09:00:00.000Z",
+   "latestRun": {
+    "status": "completed",
+    "at": "2026-10-25T09:00:00.000Z"
+   },
+   "active": false,
+   "queued": false,
+   "settled": false,
+   "prs": []
+  },
+  {
+   "threadId": "t-settled-running",
+   "title": "Settled while running",
+   "project": "chief",
+   "branch": null,
+   "creationSource": null,
+   "root": null,
+   "parent": null,
+   "model": null,
+   "updatedAt": "2026-10-25T09:00:00.000Z",
+   "latestRun": {
+    "status": "running",
+    "at": "2026-10-25T09:00:00.000Z"
+   },
+   "active": true,
    "queued": false,
    "settled": false,
    "prs": []

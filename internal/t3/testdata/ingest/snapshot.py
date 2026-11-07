@@ -24,10 +24,51 @@ import stat
 import sys
 import urllib.error
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 
 ACTIVE = {"preparing", "starting", "running"}
 FINISHED = {"completed", "interrupted", "failed", "cancelled"}
+
+# RFC 3339 section 5.6 date-time with a required offset, as chief scripts/t3-activity.py matches it
+# (chief#205). ABNF literals are case-insensitive (t, z). Python's fromisoformat also takes naive, week,
+# colon-less and space-separated forms, so it is not used here.
+RFC3339 = re.compile(r"([0-9]{4})-([0-9]{2})-([0-9]{2})[Tt]([0-9]{2}):([0-9]{2}):([0-9]{2})"
+                     r"(?:\.([0-9]+))?(?:[Zz]|([+-])([0-9]{2}):([0-9]{2}))")
+
+
+def instant(value):
+    """A comparable UTC instant for a zoned RFC 3339 date-time, else None so callers fail closed."""
+    match = RFC3339.fullmatch(value) if isinstance(value, str) else None
+    if not match:
+        return None
+    *fields, fraction, sign, offset_hours, offset_minutes = match.groups()
+    if int(offset_hours or 0) > 23 or int(offset_minutes or 0) > 59:
+        return None
+    offset = timedelta(hours=int(offset_hours or 0), minutes=int(offset_minutes or 0))
+    try:
+        when = datetime(*map(int, fields), tzinfo=timezone.utc)
+        when = when - offset if sign == "+" else when + offset
+    except (ValueError, OverflowError):
+        return None
+    # Keep every fractional digit: rounding to microseconds could order two distinct instants as equal.
+    return when, Decimal("0." + (fraction or "0"))
+
+
+def settled(payload, latest):
+    """Explicit valid settlement at or after the latest finished run, or on a thread with no run.
+
+    latest is the highest-ordinal run as (status, completed_at, else requested_at as SQL coalesce
+    picks it), or None. An ended or missing run is never settlement by itself; unknown or unfinished
+    statuses and missing, null, naive, malformed or earlier times on either side keep the hold.
+    """
+    settled_at = instant(payload.get("settledAt"))
+    if payload.get("settledOverride") != "settled" or settled_at is None:
+        return False
+    if latest is None:
+        return True
+    latest_at = instant(latest[1])
+    return latest[0] in FINISHED and latest_at is not None and settled_at >= latest_at
 
 
 def stamp(t):
@@ -62,7 +103,9 @@ def build(db, environment=""):
     for tid, status, ordinal, requested, completed in con.execute(
             "select r.thread_id, r.status, r.ordinal, r.requested_at, r.completed_at from orchestration_v2_projection_runs r"
             " join orchestration_v2_projection_threads t on t.thread_id = r.thread_id where " + live):
-        runs.setdefault(tid, []).append((status, ordinal, completed or requested))
+        # latestRun.at keeps its contract value; settlement uses SQL's coalesce, as t3-activity does.
+        runs.setdefault(tid, []).append((status, ordinal, completed or requested,
+                                         completed if completed is not None else requested))
     threads = []
     for tid, title, project, tpayload, updated in con.execute(
             "select t.thread_id, t.title, coalesce(p.title, ''), t.payload_json, t.updated_at"
@@ -70,7 +113,7 @@ def build(db, environment=""):
             " where " + live + " order by t.thread_id"):
         payload = json.loads(tpayload or "{}")
         mine = runs.get(tid, [])
-        last_done = max((n for s, n, _ in mine if s == "completed"), default=-1)
+        last_done = max((n for s, n, _, _ in mine if s == "completed"), default=-1)
         latest = max(mine, key=lambda r: r[1], default=None)
         latest_run = {"status": latest[0], "at": latest[2]} if latest else None
         lineage = payload.get("lineage") or {}
@@ -85,10 +128,9 @@ def build(db, environment=""):
             "model": (payload.get("modelSelection") or {}).get("model"),
             "updatedAt": updated,
             "latestRun": latest_run,
-            "active": any(s in ACTIVE for s, _, _ in mine),
-            "queued": any(s == "queued" and n > last_done for s, n, _ in mine),
-            "settled": bool(latest_run and payload.get("settledOverride") == "settled"
-                            and (payload.get("settledAt") or "") >= latest_run["at"]),
+            "active": any(s in ACTIVE for s, _, _, _ in mine),
+            "queued": any(s == "queued" and n > last_done for s, n, _, _ in mine),
+            "settled": settled(payload, (latest[0], latest[3]) if latest else None),
             "prs": pr_facts(con, has_table, tid, payload),
         })
     pending = []
@@ -100,7 +142,7 @@ def build(db, environment=""):
         # A request on a finished run can never be answered; T3 leaves it pending. The request
         # ID carries the run ordinal, URL-encoded 0-3 times (t3-pending.py).
         m = re.search(r"ordinal%(?:25)*3A(\d+)", request.get("id") or "")
-        if m and any(n == int(m[1]) and s in FINISHED for s, n, _ in runs.get(tid, [])):
+        if m and any(n == int(m[1]) and s in FINISHED for s, n, _, _ in runs.get(tid, [])):
             continue
         # Question text isn't in the database; the hs-pi agent reads it through its MCP.
         pending.append({"threadId": tid, "requestId": request.get("id"), "kind": kind, "createdAt": created,

@@ -129,9 +129,10 @@ func BuildIngestSnapshot(ctx context.Context, path, environment string, now func
 }
 
 type ingestRunRow struct {
-	status  string
-	ordinal int64
-	at      string
+	status   string
+	ordinal  int64
+	at       string // latestRun.at: completed_at, or requested_at when that is empty
+	settleAt string // coalesce(completed_at, requested_at), as settlement reads it
 }
 
 func ingestRuns(ctx context.Context, tx *sql.Tx) (map[string][]ingestRunRow, error) {
@@ -150,11 +151,14 @@ func ingestRuns(ctx context.Context, tx *sql.Tx) (map[string][]ingestRunRow, err
 		if err := rows.Scan(&id, &status, &ordinal, &requested, &completed); err != nil {
 			return nil, err
 		}
-		at := requested
+		at, settleAt := requested, requested
 		if completed.String != "" {
 			at = completed.String
 		}
-		out[id] = append(out[id], ingestRunRow{status: status, ordinal: ordinal, at: at})
+		if completed.Valid {
+			settleAt = completed.String
+		}
+		out[id] = append(out[id], ingestRunRow{status: status, ordinal: ordinal, at: at, settleAt: settleAt})
 	}
 	return out, rows.Err()
 }
@@ -239,14 +243,83 @@ func ingestThreads(ctx context.Context, tx *sql.Tx, runs map[string][]ingestRunR
 			thread.Active = thread.Active || ingestActive[r.status]
 			thread.Queued = thread.Queued || (r.status == "queued" && r.ordinal > lastDone)
 		}
-		if thread.LatestRun != nil && payload["settledOverride"] == "settled" {
-			settledAt, _ := payload["settledAt"].(string)
-			thread.Settled = settledAt >= thread.LatestRun.At
-		}
+		thread.Settled = settledAfterLatest(payload, latest)
 		thread.PRs = payloadPRs(payload, tablePRs[id])
 		out = append(out, thread)
 	}
 	return out, rows.Err()
+}
+
+// settledAfterLatest is the shared settlement rule (project-manager#115, chief#205),
+// as snapshot.py's settled() applies it: settledOverride is "settled" and settledAt
+// is a zoned RFC 3339 instant. With a latest run, the run has finished, its
+// settleAt is such an instant too, and settledAt is not before it. Anything
+// missing, null, naive or malformed fails closed, and so does any other status.
+func settledAfterLatest(payload map[string]any, latest *ingestRunRow) bool {
+	settledAt, ok := parseInstant(payload["settledAt"])
+	if payload["settledOverride"] != "settled" || !ok {
+		return false
+	}
+	if latest == nil {
+		return true
+	}
+	latestAt, ok := parseInstant(latest.settleAt)
+	return ingestFinished[latest.status] && ok && !settledAt.before(latestAt)
+}
+
+// rfc3339Instant is RFC 3339 section 5.6 date-time with a required offset, as
+// chief scripts/t3-activity.py matches it. T and Z may be lower case.
+var rfc3339Instant = regexp.MustCompile(`^([0-9]{4})-([0-9]{2})-([0-9]{2})[Tt]([0-9]{2}):([0-9]{2}):([0-9]{2})(?:\.([0-9]+))?(?:[Zz]|([+-])([0-9]{2}):([0-9]{2}))$`)
+
+// instant is a UTC second plus every fractional digit as written. time.Parse
+// would drop digits past nanoseconds and order two distinct instants as equal.
+type instant struct {
+	unix     int64
+	fraction string // digits after the point, trailing zeros removed
+}
+
+// parseInstant accepts what chief's instant() accepts: a real calendar date and
+// time (no leap second), an offset up to 23:59, and a UTC result within years
+// 1-9999, the range of Python's datetime.
+func parseInstant(value any) (instant, bool) {
+	text, _ := value.(string)
+	m := rfc3339Instant.FindStringSubmatch(text)
+	if m == nil {
+		return instant{}, false
+	}
+	n := make([]int, 6)
+	for i := range n {
+		n[i], _ = strconv.Atoi(m[i+1])
+	}
+	offsetHours, _ := strconv.Atoi(m[9])
+	offsetMinutes, _ := strconv.Atoi(m[10])
+	if offsetHours > 23 || offsetMinutes > 59 {
+		return instant{}, false
+	}
+	at := time.Date(n[0], time.Month(n[1]), n[2], n[3], n[4], n[5], 0, time.UTC)
+	if n[0] < 1 || at.Year() != n[0] || int(at.Month()) != n[1] || at.Day() != n[2] ||
+		at.Hour() != n[3] || at.Minute() != n[4] || at.Second() != n[5] {
+		return instant{}, false
+	}
+	offset := time.Duration(offsetHours)*time.Hour + time.Duration(offsetMinutes)*time.Minute
+	if m[8] == "+" {
+		at = at.Add(-offset)
+	} else {
+		at = at.Add(offset)
+	}
+	if at.Year() < 1 || at.Year() > 9999 {
+		return instant{}, false
+	}
+	return instant{unix: at.Unix(), fraction: strings.TrimRight(m[7], "0")}, true
+}
+
+// before orders by second, then by the fraction's digits: with trailing zeros
+// removed, string order is numeric order.
+func (a instant) before(b instant) bool {
+	if a.unix != b.unix {
+		return a.unix < b.unix
+	}
+	return a.fraction < b.fraction
 }
 
 // payloadPRs takes payload.pullRequests[], linkedPullRequest and

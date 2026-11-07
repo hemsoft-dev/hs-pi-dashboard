@@ -458,6 +458,21 @@ field for field, and a pinned copy of the script lives in
 No prompts, messages or tool payloads are sent. Question text isn't in the
 database, so `questions` is always `[]`.
 
+The pinned copy is `scripts/t3/snapshot.py` at project-manager `30bf2446`
+([#116](https://github.com/hemsoft-dev/project-manager/pull/116)).
+
+`settled` follows the rule of
+[project-manager#115](https://github.com/hemsoft-dev/project-manager/issues/115),
+which Chief's `scripts/t3-activity.py` applies too. It is true only when
+`settledOverride` is `settled` and `settledAt` is a zoned RFC 3339 date-time
+(`Z` or `±hh:mm`). With a latest run, that run must have finished (completed,
+failed, interrupted or cancelled), and `settledAt` must be at or after its
+`completed_at`, or its `requested_at` when `completed_at` is null. That time must
+be a zoned RFC 3339 date-time too, so an empty `completed_at` gives `false`,
+though `latestRun.at` then shows `requested_at`. Both are compared as instants,
+with offsets applied and every fractional digit kept. A missing, null, naive or
+malformed timestamp gives `false`. With no run, a valid `settledAt` is enough.
+
 | Flag | Default | Meaning |
 | --- | --- | --- |
 | `-pmd-url` | `http://100.97.164.73:8790` | pmd base URL; `off` disables the push |
