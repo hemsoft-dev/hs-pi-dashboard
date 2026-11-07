@@ -68,7 +68,7 @@ func Run(opts Options) error {
 		writeJSON(w, http.StatusOK, live.Snapshot())
 	})
 
-	mux.HandleFunc("GET /sessions", sessionHandler(opts))
+	mux.Handle("GET /sessions", SessionsHandler(opts))
 
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{
@@ -107,6 +107,12 @@ func startPMDPush(opts Options) {
 	}
 	go pmd.Run(context.Background(), pmd.Options{URL: opts.PMDURL, Machine: opts.Machine, TokenFile: opts.PMDTokenFile, Sources: sources})
 }
+
+// SessionsHandler serves this machine's /sessions snapshots. Until its first
+// collection completes it answers with a placeholder that has no sessionsDir
+// and no sessions array. Every completed collection, even an empty one, names
+// the Pi collector root in sessionsDir. The fleet tells the two apart by that.
+func SessionsHandler(opts Options) http.Handler { return sessionHandler(opts) }
 
 func sessionHandler(opts Options) http.HandlerFunc {
 	scanner := sessions.NewScanner(opts.Dir, opts.ActiveWindow)
