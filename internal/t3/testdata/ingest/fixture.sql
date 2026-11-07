@@ -105,6 +105,38 @@ INSERT INTO orchestration_v2_projection_runs VALUES
  ('r-sub-0','t-live/root/agent-1',0,'codex',NULL,'starting','2026-10-26T10:05:00.000Z',NULL,'{}',NULL),
  ('r-arch-0','t-archived',0,'codex',NULL,'running','2026-10-20T06:00:00.000Z',NULL,'{}',NULL);
 
+-- Settlement (project-manager#115): settledAt with an offset after and before
+-- the latest run, digits past nanoseconds after and before it, invalid and naive
+-- settledAt, a latest run that hasn't finished, and an empty completed_at, which
+-- fails closed although latestRun.at falls back to requested_at.
+INSERT INTO orchestration_v2_projection_threads VALUES
+ ('t-settled-offset','p-chief','Settled with an offset','codex','full','default',NULL,'2026-10-25T08:00:00.000Z','2026-10-25T09:00:00.000Z',NULL,NULL,
+  '{"settledOverride":"settled","settledAt":"2026-10-25T05:30:00-04:00"}',NULL),
+ ('t-settled-offset-early','p-chief','Settled with an offset before the run','codex','full','default',NULL,'2026-10-25T08:00:00.000Z','2026-10-25T09:00:00.000Z',NULL,NULL,
+  '{"settledOverride":"settled","settledAt":"2026-10-25T10:30:00+02:00"}',NULL),
+ ('t-settled-fraction','p-chief','Settled a tenth of a nanosecond after','codex','full','default',NULL,'2026-10-25T08:00:00.000Z','2026-10-25T09:00:00.000Z',NULL,NULL,
+  '{"settledOverride":"settled","settledAt":"2026-10-25T09:00:00.0000000001Z"}',NULL),
+ ('t-settled-fraction-early','p-chief','Settled under a nanosecond before','codex','full','default',NULL,'2026-10-25T08:00:00.000Z','2026-10-25T09:00:00.000Z',NULL,NULL,
+  '{"settledOverride":"settled","settledAt":"2026-10-25T09:00:00.0000000001Z"}',NULL),
+ ('t-settled-invalid','p-chief','Settled at no time','codex','full','default',NULL,'2026-10-25T08:00:00.000Z','2026-10-25T09:00:00.000Z',NULL,NULL,
+  '{"settledOverride":"settled","settledAt":"not-a-time"}',NULL),
+ ('t-settled-naive','p-chief','Settled at a naive time','codex','full','default',NULL,'2026-10-25T08:00:00.000Z','2026-10-25T09:00:00.000Z',NULL,NULL,
+  '{"settledOverride":"settled","settledAt":"2026-10-25T09:30:00"}',NULL),
+ ('t-settled-running','p-chief','Settled while running','codex','full','default',NULL,'2026-10-25T08:00:00.000Z','2026-10-25T09:00:00.000Z',NULL,NULL,
+  '{"settledOverride":"settled","settledAt":"2026-10-25T09:30:00.000Z"}',NULL),
+ ('t-settled-empty-completion','p-chief','Settled after an empty completion','codex','full','default',NULL,'2026-10-25T08:00:00.000Z','2026-10-25T09:00:00.000Z',NULL,NULL,
+  '{"settledOverride":"settled","settledAt":"2026-10-25T09:30:00.000Z"}',NULL);
+
+INSERT INTO orchestration_v2_projection_runs VALUES
+ ('r-so-0','t-settled-offset',0,'codex',NULL,'completed','2026-10-25T08:00:00.000Z','2026-10-25T09:00:00.000Z','{}',NULL),
+ ('r-soe-0','t-settled-offset-early',0,'codex',NULL,'completed','2026-10-25T08:00:00.000Z','2026-10-25T09:00:00.000Z','{}',NULL),
+ ('r-sf-0','t-settled-fraction',0,'codex',NULL,'failed','2026-10-25T08:00:00.000Z','2026-10-25T09:00:00.000000000Z','{}',NULL),
+ ('r-sfe-0','t-settled-fraction-early',0,'codex',NULL,'cancelled','2026-10-25T08:00:00.000Z','2026-10-25T09:00:00.00000000019Z','{}',NULL),
+ ('r-si-0','t-settled-invalid',0,'codex',NULL,'completed','2026-10-25T08:00:00.000Z','2026-10-25T09:00:00.000Z','{}',NULL),
+ ('r-sn-0','t-settled-naive',0,'codex',NULL,'completed','2026-10-25T08:00:00.000Z','2026-10-25T09:00:00.000Z','{}',NULL),
+ ('r-sr-0','t-settled-running',0,'codex',NULL,'running','2026-10-25T09:00:00.000Z',NULL,'{}',NULL),
+ ('r-sec-0','t-settled-empty-completion',0,'codex',NULL,'failed','2026-10-25T09:00:00.000Z','','{}',NULL);
+
 -- PRs from the table: one duplicate of a payload PR (watch false there, so
 -- kept), one new, one without a snapshot, one on an archived thread.
 INSERT INTO projection_thread_pull_requests VALUES
