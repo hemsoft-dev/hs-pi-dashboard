@@ -883,6 +883,13 @@ five computers from the fleet map. An optional third field,
 Terminal links require HTTPS and cannot embed credentials. Machines that don't
 answer are shown offline with their last known sessions grayed out.
 
+The server answers `/` and `/healthz` as soon as it starts and polls in the
+background, every 5 seconds by default. Each poll sends every machine's
+`/sessions`, `/herdr` and `/projects` requests at the same time, each with a
+3-second deadline, and the next poll starts only after the previous one ends.
+A machine that accepts connections but never answers therefore costs about
+3 seconds per poll, and the other machines keep refreshing every 5 seconds.
+
 ## Install
 
 ### home / laptop — Windows scheduled task (agent)

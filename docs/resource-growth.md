@@ -58,7 +58,7 @@ The full reasoning sits beside each bound in the test files. In short:
 | Resource | Agent | Fleet | Why |
 | --- | --- | --- | --- |
 | Goroutines | 8 | 8 | A cycle leaves only keep-alive connections, 3 goroutines each in this process. Two the baseline missed are 6, plus 2 for runtime and testing timers |
-| OS threads | GOMAXPROCS + 12 | GOMAXPROCS + 4 | The runtime cannot pass GOMAXPROCS threads running Go plus those blocked in system calls (agent: 12 at once; fleet: one per agent). A thread only leaks by stranding its goroutine, which the goroutine bound catches |
+| OS threads | GOMAXPROCS + 12 | GOMAXPROCS + 4 | The runtime keeps OS threads created during warm-up. The allowances cover measured steady-state variation while the agent runs up to 12 collector calls and the fleet sends three requests per agent concurrently. Stranded goroutines are caught separately |
 | Live heap | 1 MiB | 1 MiB | Both keep one snapshot per source, fixed-size for fixed fakes. A 4 KiB retention per cycle is 1.2 MiB over 300 cycles |
 | Handles | 8 + 8 per new thread on Windows | same | Two connections are 4 descriptors on Linux. On Windows each Go thread holds about 6 handles, 8 once it has used a socket (measured; `TestHandlesPerThread` rechecks it), so the threads' own handles are credited |
 | Children | 0 | 0 | `agy` is waited for inside the cycle; the server starts no processes |

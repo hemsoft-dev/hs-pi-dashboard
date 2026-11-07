@@ -13,11 +13,6 @@
   },
   "exceptions": [
     {
-      "function": "internal/fleet/server.go:(*Server).Run",
-      "reason": "Baseline hotspot from #88: starts the poll tickers and blocks in ListenAndServe; only the running service exercises it.",
-      "max_crap": {"linux": 56.0, "windows": 56.0}
-    },
-    {
       "function": "internal/usage/usage.go:(*Fetcher).refreshAntigravity",
       "reason": "Baseline hotspot from #88: Antigravity token refresh posts to a fixed token URL that tests do not redirect yet.",
       "max_crap": {"linux": 56.0, "windows": 56.0}

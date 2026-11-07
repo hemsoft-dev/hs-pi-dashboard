@@ -40,8 +40,8 @@ import (
 // Bounds on growth over the warm-up baseline, after a forced GC and Settle.
 // docs/resource-growth.md records the measured growth on Windows and Linux.
 //
-//   - Goroutines 8: the server polls each agent's endpoints in sequence, so
-//     http.DefaultTransport keeps one idle connection per agent (3 goroutines
+//   - Goroutines 8: the server polls each agent's endpoints at once, and
+//     agentTransport keeps one idle connection per endpoint (3 goroutines
 //     each: client read and write loops, fake agent conn). Answers the server
 //     closes unread end their connection, which then winds down. Up to two
 //     connections the lowest baseline sample missed is 6, plus 2 for runtime
@@ -50,7 +50,7 @@ import (
 //     is busy and never releases it, so the count creeps up under bursts
 //     (Home's Windows runs grew 0 to 4). It cannot pass GOMAXPROCS threads
 //     running Go code plus those blocked in system calls, at most one per
-//     agent polled at once. A thread can only leak by stranding its
+//     request in flight. A thread can only leak by stranding its
 //     goroutine, which the goroutine bound already catches.
 //   - Live heap 1 MiB: the server keeps one MachineState and one usage
 //     snapshot per agent, fixed-size for fixed fakes. A 4 KiB retention per
@@ -180,8 +180,10 @@ func newFleetGrowthHarness(t *testing.T) *fleetGrowthHarness {
 		h.agents[name] = agent
 		targets = append(targets, Target{Name: name, URL: agent.URL})
 	}
-	// The fleet server uses http.DefaultClient; drop this test's idle
-	// connections before the next test measures.
+	// The fleet server uses agentTransport and the leak control
+	// http.DefaultClient; drop this test's idle connections before the next
+	// test measures.
+	t.Cleanup(agentTransport.CloseIdleConnections)
 	t.Cleanup(http.DefaultTransport.(*http.Transport).CloseIdleConnections)
 	h.server = NewServer(targets, time.Hour)
 	return h
