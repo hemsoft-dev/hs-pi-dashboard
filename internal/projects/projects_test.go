@@ -43,6 +43,25 @@ func TestInvalidContract(t *testing.T) {
 		}
 	}
 }
+// A restarted agent has no previous document, so a failed first sweep
+// publishes an error with no document and waits a full interval. The fleet
+// keeps its own last document for this case; fleet tests rely on this output.
+func TestFreshStoreFailedFirstSweepHasNoDocument(t *testing.T) {
+	s := New([]string{"/repo"}, 0)
+	if r := s.Snapshot().Results; len(r) != 1 || r[0].Error != "initial collection pending" || r[0].Document != nil {
+		t.Fatalf("startup snapshot = %+v", r)
+	}
+	s.run = func(context.Context, string) ([]byte, error) { return nil, errors.New("gh not ready") }
+	s.refresh(context.Background())
+	r := s.Snapshot().Results
+	if len(r) != 1 || r[0].Path != filepath.Clean("/repo") || r[0].Document != nil || r[0].Error != "gh x status --json failed; check gh-x installation, checkout and host authentication" {
+		t.Fatalf("failed first sweep = %+v", r)
+	}
+	if d := s.nextDelay(); d != DefaultPollInterval {
+		t.Fatalf("next sweep after %s, want %s", d, DefaultPollInterval)
+	}
+}
+
 func TestBoundedCollectionAndCacheRecovery(t *testing.T) {
 	s := New([]string{"a", "b", "c", "d", "e", "a"}, time.Minute)
 	data := fixture(t)

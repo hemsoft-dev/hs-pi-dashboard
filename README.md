@@ -698,6 +698,11 @@ per repository, with GitHub links and each section's own freshness/error metadat
 Counts are row counts from gh-x, so its default five merged PRs/runs remain five.
 An unavailable section is never presented as an empty success. Failed refreshes
 retain their last document and original timestamp; offline machines remain explicit.
+The hub also keeps each checkout's last document through an agent restart: when
+an agent reports a checkout without a document (its first sweep is pending or
+failed) or with an older one, the hub shows the document it already holds beside
+the agent's message. A checkout the hub has never seen a document for shows the
+agent's result as is.
 Missing/old agents report a Projects warning without affecting session or usage collection.
 
 ## Build
@@ -882,6 +887,15 @@ five computers from the fleet map. An optional third field,
 `name|url|https-terminal-url`, adds a link to that machine's browser terminal.
 Terminal links require HTTPS and cannot embed credentials. Machines that don't
 answer are shown offline with their last known sessions grayed out.
+
+A restarted agent answers `/sessions` at once with a placeholder that has no
+`sessionsDir` and no `sessions` array until its first collection completes.
+A completed collection always reports `sessionsDir`, even with no sessions.
+For a placeholder the server keeps the machine online with the error
+`session collection pending after agent start`, shows the placeholder's source
+health, and keeps the last known sessions as inactive history, so neither
+the active count nor Pulse counts them. The first completed collection
+replaces them.
 
 The server answers `/` and `/healthz` as soon as it starts and polls in the
 background, every 5 seconds by default. Each poll sends every machine's
