@@ -21,7 +21,7 @@ func (s *Server) fetchHerdr(ctx context.Context, t Target) *herdr.Snapshot {
 	if err != nil {
 		return unavailable("Invalid collector address")
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := agentClient.Do(req)
 	if err != nil {
 		return unavailable("Live agent collector is unreachable")
 	}

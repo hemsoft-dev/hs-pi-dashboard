@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -53,6 +54,18 @@ type FleetSnapshot struct {
 	HermesSessions []hermes.Session `json:"hermesSessions"`
 	ActiveSessions int              `json:"activeSessions"`
 }
+
+// agentTransport keeps an idle connection for each request a poll sends one
+// agent at once (/sessions, /herdr and /projects) plus /usage. With
+// http.DefaultTransport's two per host, every poll would dial one new
+// connection per agent and close another.
+var agentTransport = func() *http.Transport {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.MaxIdleConnsPerHost = 4
+	return t
+}()
+
+var agentClient = &http.Client{Transport: agentTransport}
 
 // Server polls agents and serves /api/fleet plus the embedded UI.
 type Server struct {
@@ -110,58 +123,79 @@ func NewServer(targets []Target, pollEvery time.Duration) *Server {
 	}
 }
 
-// Run starts the poll loop and the HTTP server. It blocks until the server
+// Run starts the poll loops and the HTTP server. It blocks until the server
 // exits.
 func (s *Server) Run(addr string) error {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	ticker := time.NewTicker(s.pollEvery)
-	defer ticker.Stop()
-	usageTicker := time.NewTicker(s.usagePoll)
-	defer usageTicker.Stop()
-	s.poll(ctx) // first pass immediately
-	go s.pollUsage(ctx)
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				s.poll(ctx)
-			}
-		}
-	}()
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-usageTicker.C:
-				s.pollUsage(ctx)
-			}
-		}
-	}()
-
-	srv := &http.Server{Addr: addr, Handler: s.routes(), ReadHeaderTimeout: 5 * time.Second}
-	log.Printf("hs-pi-dashboard serve listening on %s (poll=%s, machines=%d)", addr, s.pollEvery, len(s.targets))
-	return srv.ListenAndServe()
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return err
+	}
+	return s.serve(context.Background(), ln)
 }
 
+// serve answers HTTP on ln at once, while the first fleet and usage polls run
+// in the background, so a stalled agent cannot delay /healthz or the page.
+// Cancelling ctx closes the server and waits for both poll loops to stop.
+func (s *Server) serve(ctx context.Context, ln net.Listener) error {
+	ctx, cancel := context.WithCancel(ctx)
+	var loops sync.WaitGroup
+	defer func() {
+		cancel()
+		loops.Wait()
+	}()
+	loops.Go(func() { every(ctx, s.pollEvery, s.poll) })
+	loops.Go(func() { every(ctx, s.usagePoll, s.pollUsage) })
+
+	srv := &http.Server{Handler: s.routes(), ReadHeaderTimeout: 5 * time.Second}
+	log.Printf("hs-pi-dashboard serve listening on %s (poll=%s, machines=%d)", ln.Addr(), s.pollEvery, len(s.targets))
+	served := make(chan error, 1)
+	go func() { served <- srv.Serve(ln) }()
+	select {
+	case err := <-served:
+		return err
+	case <-ctx.Done():
+		_ = srv.Close()
+		<-served
+		return ctx.Err()
+	}
+}
+
+// every runs fn at once and then on each tick until ctx ends. A run longer
+// than interval drops the ticks it overlaps instead of starting another run,
+// so runs of fn never overlap.
+func every(ctx context.Context, interval time.Duration, fn func(context.Context)) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for ctx.Err() == nil {
+		fn(ctx)
+		select {
+		case <-ctx.Done():
+		case <-ticker.C:
+		}
+	}
+}
+
+// poll refreshes every target. Each target's /sessions, /herdr and /projects
+// requests run at the same time, each under its own s.timeout, so a stalled
+// target costs one timeout per poll rather than one per endpoint.
 func (s *Server) poll(ctx context.Context) {
 	var wg sync.WaitGroup
 	for _, t := range s.targets {
-		wg.Add(1)
-		go func(t Target) {
-			defer wg.Done()
+		wg.Go(func() {
+			var herdrSnap *herdr.Snapshot
+			var projectsSnap *projects.Snapshot
+			var endpoints sync.WaitGroup
+			endpoints.Go(func() { herdrSnap = s.fetchHerdr(ctx, t) })
+			endpoints.Go(func() { projectsSnap = s.fetchProjects(ctx, t) })
 			state := s.fetch(ctx, t)
-			state.Herdr = s.fetchHerdr(ctx, t)
-			state.Projects = s.fetchProjects(ctx, t)
+			endpoints.Wait()
+			state.Herdr = herdrSnap
+			state.Projects = projectsSnap
 			state.TerminalURL = t.TerminalURL
 			s.mu.Lock()
 			s.cache[t.Name] = state
 			s.mu.Unlock()
-		}(t)
+		})
 	}
 	wg.Wait()
 }
@@ -177,7 +211,7 @@ func (s *Server) fetch(ctx context.Context, t Target) MachineState {
 		return s.mergeStale(state)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := agentClient.Do(req)
 	if err != nil {
 		state.Error = err.Error()
 		return s.mergeStale(state)
@@ -385,7 +419,7 @@ func (s *Server) fetchUsage(ctx context.Context, t Target) *usage.Snapshot {
 	if err != nil {
 		return nil
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := agentClient.Do(req)
 	if err != nil {
 		return nil
 	}
@@ -431,7 +465,7 @@ func (s *Server) fetchProjects(ctx context.Context, t Target) *projects.Snapshot
 	req, err := http.NewRequestWithContext(c, http.MethodGet, strings.TrimRight(t.URL, "/")+"/projects", nil)
 	message := "projects endpoint unavailable; update agent or check machine connection"
 	if err == nil {
-		resp, e := http.DefaultClient.Do(req)
+		resp, e := agentClient.Do(req)
 		if e == nil {
 			defer resp.Body.Close()
 			if resp.StatusCode == http.StatusOK {
