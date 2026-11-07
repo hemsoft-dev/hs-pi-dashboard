@@ -24,9 +24,9 @@ import (
 
 const pendingWithRows = sessionCollectionPending + "; showing last known sessions"
 
-// restartableAgent serves one handler at a time. down drops each connection
-// without a reply, as a stopped agent does; restart installs a fresh handler,
-// as a new agent process does.
+// restartableAgent serves one /sessions handler at a time and 404s other
+// paths. down drops each connection without a reply, as a stopped agent does;
+// restart installs a fresh handler, as a new agent process does.
 type restartableAgent struct {
 	*httptest.Server
 	handler atomic.Pointer[http.Handler]
@@ -40,6 +40,10 @@ func newRestartableAgent(t *testing.T, h http.Handler) *restartableAgent {
 	a.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if a.down.Load() {
 			panic(http.ErrAbortHandler)
+		}
+		if r.URL.Path != "/sessions" {
+			http.NotFound(w, r)
+			return
 		}
 		(*a.handler.Load()).ServeHTTP(w, r)
 	}))
@@ -238,8 +242,22 @@ func TestServeLoopNeverShowsRestartedAgentHealthyAndEmpty(t *testing.T) {
 	a.down.Store(true)
 	wait("offline reading", func(m MachineState) bool { return !m.Online })
 
+	// The pending reading lasts one 20 ms poll. Hold the restarted agent's
+	// later requests until the sampler has seen it, so a descheduled sampler
+	// cannot miss the window. The first request still gets the placeholder.
 	restarted, _ := piAgent(t, 1)
-	a.restart(restarted)
+	seen := make(chan struct{})
+	var requests atomic.Int32
+	a.restart(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if requests.Add(1) > 1 {
+			select {
+			case <-seen:
+			case <-r.Context().Done():
+				return
+			}
+		}
+		restarted.ServeHTTP(w, r)
+	}))
 	sawPending, recovered := false, false
 	deadline := time.Now().Add(10 * time.Second)
 	for !recovered && time.Now().Before(deadline) {
@@ -248,8 +266,11 @@ func TestServeLoopNeverShowsRestartedAgentHealthyAndEmpty(t *testing.T) {
 			t.Fatalf("restarted agent read as healthy and empty: %+v", m)
 		}
 		if m.Online && m.Error == pendingWithRows {
-			sawPending = true
 			assertCounts(t, "pending", m, 0)
+			if !sawPending {
+				sawPending = true
+				close(seen)
+			}
 		}
 		recovered = m.Online && m.Error == "" && len(m.Sessions) == 1 && m.Sessions[0].Active
 		time.Sleep(time.Millisecond)
