@@ -799,18 +799,19 @@ the step fails when:
   function that crosses 30;
 - a function with an exception scores above its ceiling, or the platform's
   worst score rises above its declared baseline (56.0 on both platforms, from
-  `main`, `(*Server).Run` and `(*Fetcher).refreshAntigravity`);
+  `main` and `(*Fetcher).refreshAntigravity`);
 - an exception names a function that no longer exists.
 
 The exceptions record the functions above 30 at the baseline with their
-measured scores: the same 13 on Linux and Windows. Windows tests for
+measured scores: the same 12 on Linux and Windows. Windows tests for
 `verifyRuntimeProcess` and `runtimePort` (#97) removed their Windows-only
 exceptions and lowered the Windows baseline from 210.0. Fixture tests for
 `credsFromMap` (#99) removed its exception and lowered both baselines from 72.0.
-They need no rewrite, but any change that lowers their
-coverage or raises their complexity fails. When a function improves, the step
-prints a notice; lower or remove its ceiling in the same change. Run the gate
-locally on Linux with pinned gocyclo installed:
+The fleet poll rework and its tests (#118) brought `(*Server).Run` under 30 and
+removed its exception. The remaining functions need no rewrite, but any change
+that lowers their coverage or raises their complexity fails. When a function
+improves, the step prints a notice; lower or remove its ceiling in the same
+change. Run the gate locally on Linux with pinned gocyclo installed:
 
 ```bash
 go install github.com/fzipp/gocyclo/cmd/gocyclo@v0.6.0
